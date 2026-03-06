@@ -18,7 +18,15 @@ class CarInterface(CarInterfaceBase):
     # - replacement for ES_Distance so we can cancel the cruise control
     # - to find the Cruise_Activated bit from the car
     # - proper panda safety setup (use the correct cruise_activated bit, throttle from Throttle_Hybrid, etc)
-    ret.dashcamOnly = bool(ret.flags & (SubaruFlags.PREGLOBAL | SubaruFlags.LKAS_ANGLE | SubaruFlags.HYBRID))
+    # for LKAS_ANGLE CARS to be upstreamed, we need:
+    # - validate angle safety
+    ret.dashcamOnly = bool((ret.flags & (SubaruFlags.PREGLOBAL | SubaruFlags.HYBRID)) or
+                       ((ret.flags & SubaruFlags.LKAS_ANGLE) and is_release))
+
+    if candidate == CAR.SUBARU_FORESTER_2022:
+      # Gen 1 LKAS angle not tested, can undashcam if not release once we see a test route
+      ret.dashcamOnly = False
+      
     ret.autoResumeSng = False
 
     # Detect infotainment message sent from the camera
