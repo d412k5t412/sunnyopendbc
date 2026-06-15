@@ -13,15 +13,18 @@ from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
-# Angle-LKAS EPS hard-faults on engagement if the wheel is rotating or the target is far from current angle
 ANGLE_ENGAGE_MAX_STEER_RATE = 5.0      # deg/s
 ANGLE_ENGAGE_RATE_SETTLE_FRAMES = 30   # 0.3 s at 100 Hz
 ANGLE_ENGAGE_MAX_ANGLE_DELTA = 3.0     # deg
 
-# Below ~5 mph the EPS oscillates and can fault on small commands; apply deadzone + slew limit
 LOW_SPEED_ANGLE_HOLD_SPEED = 2.24  # m/s (5 mph)
 LOW_SPEED_MIN_ANGLE_DELTA = 0.3    # deg/cmd at standstill
 LOW_SPEED_MAX_ANGLE_DELTA = 3.0    # deg/cmd at threshold
+
+RELEASE_MAX_ANGLE_DELTA = 0.5
+RELEASE_MAX_FRAMES = 50
+
+MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
@@ -32,6 +35,7 @@ class CarController(CarControllerBase, SnGCarController):
     self.lat_active_prev = False
     self.lkas_request_last = False
     self.last_high_steer_rate_frame = -ANGLE_ENGAGE_RATE_SETTLE_FRAMES
+    self.release_frame_count = 0
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
@@ -47,21 +51,38 @@ class CarController(CarControllerBase, SnGCarController):
 
     if abs(CS.out.steeringRateDeg) > ANGLE_ENGAGE_MAX_STEER_RATE:
       self.last_high_steer_rate_frame = self.frame
-    if not CC.latActive:
-      lkas_request = False
-    elif self.lkas_request_last:
-      lkas_request = True
+
+    if CC.latActive:
+      mads_only_ok = CC.enabled or abs(CS.out.steeringAngleDeg) < MADS_ONLY_MAX_STEER_ANGLE
+      if self.lkas_request_last:
+        lkas_request_desired = mads_only_ok
+      else:
+        rate_settled = (self.frame - self.last_high_steer_rate_frame) >= ANGLE_ENGAGE_RATE_SETTLE_FRAMES
+        angle_aligned = abs(CC.actuators.steeringAngleDeg - CS.out.steeringAngleDeg) < ANGLE_ENGAGE_MAX_ANGLE_DELTA
+        lkas_request_desired = rate_settled and angle_aligned and mads_only_ok
     else:
-      rate_settled = (self.frame - self.last_high_steer_rate_frame) >= ANGLE_ENGAGE_RATE_SETTLE_FRAMES
-      angle_aligned = abs(CC.actuators.steeringAngleDeg - CS.out.steeringAngleDeg) < ANGLE_ENGAGE_MAX_ANGLE_DELTA
-      lkas_request = rate_settled and angle_aligned
+      lkas_request_desired = False
+
+    releasing = False
+    if lkas_request_desired:
+      lkas_request = True
+      self.release_frame_count = 0
+    elif self.lkas_request_last:
+      releasing = True
+      self.release_frame_count += 1
+      angle_error = abs(self.apply_angle_last - CS.out.steeringAngleDeg)
+      lkas_request = angle_error >= RELEASE_MAX_ANGLE_DELTA and self.release_frame_count < RELEASE_MAX_FRAMES
+    else:
+      lkas_request = False
+
     self.lkas_request_last = lkas_request
 
-    apply_angle = CC.actuators.steeringAngleDeg
-    if rising_edge:
+    if CC.latActive and not rising_edge and not releasing:
+      apply_angle = CC.actuators.steeringAngleDeg
+    else:
       apply_angle = CS.out.steeringAngleDeg
 
-    if lkas_request and CS.out.vEgoRaw < LOW_SPEED_ANGLE_HOLD_SPEED:
+    if CC.latActive and lkas_request and not releasing and CS.out.vEgoRaw < LOW_SPEED_ANGLE_HOLD_SPEED:
       deadzone = np.interp(CS.out.vEgoRaw, [0., LOW_SPEED_ANGLE_HOLD_SPEED], [6.0, 3.0])
       apply_angle = self.apply_angle_last + apply_center_deadzone(apply_angle - self.apply_angle_last, deadzone)
 
@@ -70,10 +91,10 @@ class CarController(CarControllerBase, SnGCarController):
       apply_angle = float(np.clip(apply_angle, self.apply_angle_last - low_speed_delta,
                                   self.apply_angle_last + low_speed_delta))
 
-    apply_steer = apply_std_steer_angle_limits(apply_angle, self.apply_angle_last, CS.out.vEgoRaw,
-                                               CS.out.steeringAngleDeg, lkas_request, self.p.ANGLE_LIMITS)
-
-    if not lkas_request:
+    if lkas_request:
+      apply_steer = apply_std_steer_angle_limits(apply_angle, self.apply_angle_last, CS.out.vEgoRaw,
+                                                 CS.out.steeringAngleDeg, True, self.p.ANGLE_LIMITS)
+    else:
       apply_steer = CS.out.steeringAngleDeg
 
     self.apply_angle_last = apply_steer
@@ -164,11 +185,16 @@ class CarController(CarControllerBase, SnGCarController):
         self.es_disengage_frames = min(self.es_disengage_frames + 1, 1000)
       es_enabled = self.es_disengage_frames < 50 or (CS.out.brakePressed and self.es_disengage_frames < 500)
 
+      if self.CP.flags & SubaruFlags.LKAS_ANGLE:
+        lkas_dash_active = self.lkas_request_last
+      else:
+        lkas_dash_active = es_enabled
+
       if self.frame % 10 == 0:
         can_sends.append(subarucan.create_es_dashstatus(self.packer, self.frame // 10, CS.es_dashstatus_msg, es_enabled,
                                                         self.CP.openpilotLongitudinalControl, CC.longActive, hud_control.leadVisible))
 
-        can_sends.append(subarucan.create_es_lkas_state(self.packer, self.frame // 10, CS.es_lkas_state_msg, es_enabled, hud_control.visualAlert,
+        can_sends.append(subarucan.create_es_lkas_state(self.packer, self.frame // 10, CS.es_lkas_state_msg, lkas_dash_active, hud_control.visualAlert,
                                                         hud_control.leftLaneVisible, hud_control.rightLaneVisible,
                                                         hud_control.leftLaneDepart, hud_control.rightLaneDepart))
 

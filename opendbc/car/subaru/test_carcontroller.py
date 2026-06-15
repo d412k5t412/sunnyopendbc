@@ -10,7 +10,8 @@ from opendbc.car.subaru.values import CAR
 class TestSubaruCarController(unittest.TestCase):
   def test_lkas_angle_rising_edge_uses_live_steering_angle(self):
     CP = CarInterface.get_non_essential_params(CAR.SUBARU_CROSSTREK_2025)
-    controller = CarController({}, CP)
+    CP_SP = CarInterface.get_non_essential_params_sp(CP, CAR.SUBARU_CROSSTREK_2025)
+    controller = CarController({}, CP, CP_SP)
 
     controller.apply_angle_last = 2.46
 

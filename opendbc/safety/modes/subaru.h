@@ -91,7 +91,6 @@
 static bool subaru_gen2 = false;
 static bool subaru_longitudinal = false;
 static bool subaru_lkas_angle = false;
-static bool subaru_stop_and_go = false;
 
 static uint32_t subaru_get_checksum(const CANPacket_t *msg) {
   return (uint8_t)msg->data[0];
@@ -143,6 +142,9 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
       bool cruise_engaged = (msg->data[4] >> 7) & 1U;
       pcm_cruise_check(cruise_engaged);
     }
+    if ((msg->addr == MSG_SUBARU_ES_DashStatus) && (msg->bus == SUBARU_CAM_BUS)) {
+      acc_main_on = GET_BIT(msg, 49U);
+    }
   } else {
     // enter controls on rising edge of ACC, exit controls on ACC off
     if ((msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
@@ -151,11 +153,12 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // enter controls on rising edge of ACC, exit controls on ACC off
   if ((msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
-    bool cruise_engaged = (msg->data[5] >> 1) & 1U;
-    pcm_cruise_check(cruise_engaged);
-    acc_main_on = GET_BIT(msg, 40U);
+    if (!subaru_lkas_angle) {
+      bool cruise_engaged = (msg->data[5] >> 1) & 1U;
+      pcm_cruise_check(cruise_engaged);
+      acc_main_on = GET_BIT(msg, 40U);
+    }
   }
 
   // update vehicle moving with any non-zero wheel speed
@@ -317,9 +320,9 @@ static safety_config subaru_init(uint16_t param) {
   };
 
   static const CanMsg SUBARU_LKAS_ANGLE_GEN2_LONG_TX_MSGS[] = {
-    SUBARU_BASE_TX_MSGS(SUBARU_ALT_BUS, MSG_SUBARU_ES_LKAS_ANGLE)
+    SUBARU_BASE_TX_MSGS(SUBARU_ALT_BUS, MSG_SUBARU_ES_LKAS_ANGLE) // lat
     SUBARU_COMMON_TX_MSGS(SUBARU_ALT_BUS)
-    SUBARU_COMMON_LONG_TX_MSGS(SUBARU_ALT_BUS)
+    SUBARU_COMMON_LONG_TX_MSGS(SUBARU_ALT_BUS) // long
     SUBARU_GEN2_LONG_ADDITIONAL_TX_MSGS()
   };
 
