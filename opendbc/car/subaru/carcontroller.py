@@ -54,12 +54,13 @@ class CarController(CarControllerBase, SnGCarController):
 
     if CC.latActive:
       mads_only_ok = CC.enabled or abs(CS.out.steeringAngleDeg) < MADS_ONLY_MAX_STEER_ANGLE
+      brake_hold_ok = not (CS.out.brakePressed and CS.out.standstill)
       if self.lkas_request_last:
-        lkas_request_desired = mads_only_ok
+        lkas_request_desired = mads_only_ok and brake_hold_ok
       else:
         rate_settled = (self.frame - self.last_high_steer_rate_frame) >= ANGLE_ENGAGE_RATE_SETTLE_FRAMES
         angle_aligned = abs(CC.actuators.steeringAngleDeg - CS.out.steeringAngleDeg) < ANGLE_ENGAGE_MAX_ANGLE_DELTA
-        lkas_request_desired = rate_settled and angle_aligned and mads_only_ok
+        lkas_request_desired = rate_settled and angle_aligned and mads_only_ok and brake_hold_ok
     else:
       lkas_request_desired = False
 
