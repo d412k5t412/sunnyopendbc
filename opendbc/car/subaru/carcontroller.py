@@ -57,7 +57,7 @@ class CarController(CarControllerBase, SnGCarController):
 
     if CC.latActive:
       mads_only_ok = CC.enabled or abs(CS.out.steeringAngleDeg) < MADS_ONLY_MAX_STEER_ANGLE
-      brake_hold_ok = not (CS.out.brakePressed and CS.out.standstill)
+      brake_hold_ok = CC.enabled or not CS.out.brakePressed
       if self.lkas_request_last:
         lkas_request_desired = mads_only_ok and brake_hold_ok
       else:
