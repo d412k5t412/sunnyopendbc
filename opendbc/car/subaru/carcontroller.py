@@ -13,7 +13,7 @@ from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
-ANGLE_ENGAGE_MAX_STEER_RATE = 5.0      # deg/s
+ANGLE_ENGAGE_MAX_STEER_RATE = 2.0      # deg/s
 ANGLE_ENGAGE_RATE_SETTLE_FRAMES = 30   # 0.3 s at 100 Hz
 ANGLE_ENGAGE_MAX_ANGLE_DELTA = 3.0     # deg
 
