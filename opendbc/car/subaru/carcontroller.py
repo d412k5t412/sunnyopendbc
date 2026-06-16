@@ -26,6 +26,8 @@ RELEASE_MAX_FRAMES = 50
 
 MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
+LOW_SPEED_FILTER_ALPHA = 0.2  # EMA weight on new sample; lower = more smoothing
+
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
     CarControllerBase.__init__(self, dbc_names, CP, CP_SP)
@@ -36,6 +38,7 @@ class CarController(CarControllerBase, SnGCarController):
     self.lkas_request_last = False
     self.last_high_steer_rate_frame = -ANGLE_ENGAGE_RATE_SETTLE_FRAMES
     self.release_frame_count = 0
+    self.filtered_angle_cmd = None
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
@@ -82,12 +85,21 @@ class CarController(CarControllerBase, SnGCarController):
       apply_angle = CC.actuators.steeringAngleDeg
     else:
       apply_angle = CS.out.steeringAngleDeg
+      self.filtered_angle_cmd = None
 
     if CC.latActive and lkas_request and not releasing and CS.out.vEgoRaw < LOW_SPEED_ANGLE_HOLD_SPEED:
+      if self.filtered_angle_cmd is None:
+        self.filtered_angle_cmd = apply_angle
+      else:
+        self.filtered_angle_cmd += LOW_SPEED_FILTER_ALPHA * (apply_angle - self.filtered_angle_cmd)
+      apply_angle = self.filtered_angle_cmd
+
       low_speed_delta = float(np.interp(CS.out.vEgoRaw, [0., LOW_SPEED_ANGLE_HOLD_SPEED],
                                         [LOW_SPEED_MIN_ANGLE_DELTA, LOW_SPEED_MAX_ANGLE_DELTA]))
       apply_angle = float(np.clip(apply_angle, self.apply_angle_last - low_speed_delta,
                                   self.apply_angle_last + low_speed_delta))
+    else:
+      self.filtered_angle_cmd = None
 
     if lkas_request:
       apply_steer = apply_std_steer_angle_limits(apply_angle, self.apply_angle_last, CS.out.vEgoRaw,
