@@ -20,7 +20,7 @@ class CarControllerParams:
     self.STEER_DRIVER_FACTOR = 1       # from dbc
 
     self.ANGLE_LIMITS: AngleSteeringLimits = AngleSteeringLimits(
-      480,
+      450,
       ([0., 5., 35.], [5., .8, .15]),
       ([0., 5., 35.], [5., .8, .15]),
     )
