@@ -84,7 +84,8 @@ class CarController(CarControllerBase, SnGCarController):
       apply_angle = CS.out.steeringAngleDeg
 
     if CC.latActive and lkas_request and not releasing and CS.out.vEgoRaw < LOW_SPEED_ANGLE_HOLD_SPEED:
-      deadzone = np.interp(CS.out.vEgoRaw, [0., LOW_SPEED_ANGLE_HOLD_SPEED], [6.0, 3.0])
+      base_deadzone = np.interp(CS.out.vEgoRaw, [0., LOW_SPEED_ANGLE_HOLD_SPEED], [6.0, 3.0])
+      deadzone = float(np.interp(abs(apply_angle), [0., 5., 15.], [base_deadzone, base_deadzone * 0.5, 0.]))
       apply_angle = self.apply_angle_last + apply_center_deadzone(apply_angle - self.apply_angle_last, deadzone)
 
       low_speed_delta = float(np.interp(CS.out.vEgoRaw, [0., LOW_SPEED_ANGLE_HOLD_SPEED],
