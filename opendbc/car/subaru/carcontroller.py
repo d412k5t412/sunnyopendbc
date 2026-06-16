@@ -1,7 +1,7 @@
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, make_tester_present_msg
-from opendbc.car.lateral import apply_center_deadzone, apply_driver_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance
+from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.subaru import subarucan
 from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
@@ -84,10 +84,6 @@ class CarController(CarControllerBase, SnGCarController):
       apply_angle = CS.out.steeringAngleDeg
 
     if CC.latActive and lkas_request and not releasing and CS.out.vEgoRaw < LOW_SPEED_ANGLE_HOLD_SPEED:
-      base_deadzone = np.interp(CS.out.vEgoRaw, [0., LOW_SPEED_ANGLE_HOLD_SPEED], [6.0, 3.0])
-      deadzone = float(np.interp(abs(apply_angle), [0., 5., 15.], [base_deadzone, base_deadzone * 0.5, 0.]))
-      apply_angle = self.apply_angle_last + apply_center_deadzone(apply_angle - self.apply_angle_last, deadzone)
-
       low_speed_delta = float(np.interp(CS.out.vEgoRaw, [0., LOW_SPEED_ANGLE_HOLD_SPEED],
                                         [LOW_SPEED_MIN_ANGLE_DELTA, LOW_SPEED_MAX_ANGLE_DELTA]))
       apply_angle = float(np.clip(apply_angle, self.apply_angle_last - low_speed_delta,
