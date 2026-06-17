@@ -26,7 +26,7 @@ RELEASE_MAX_FRAMES = 50
 
 MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
-LOW_SPEED_FILTER_ALPHA = 0.2  # EMA weight on new sample; lower = more smoothing
+LOW_SPEED_FILTER_ALPHA = 0.1  # EMA weight on new sample; lower = more smoothing
 
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
