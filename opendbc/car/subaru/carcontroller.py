@@ -26,6 +26,8 @@ RELEASE_MAX_FRAMES = 50
 
 MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
+SAFE_ANGLE_MAX = 320.0
+
 LOW_SPEED_FILTER_ALPHA = 0.1  # EMA weight on new sample; lower = more smoothing
 
 class CarController(CarControllerBase, SnGCarController):
@@ -110,6 +112,12 @@ class CarController(CarControllerBase, SnGCarController):
 
     self.apply_angle_last = apply_steer
     self.lat_active_prev = CC.latActive
+
+    if abs(apply_steer) > SAFE_ANGLE_MAX:
+      apply_steer = SAFE_ANGLE_MAX if apply_steer > 0 else -SAFE_ANGLE_MAX
+      lkas_request = False
+      self.lkas_request_last = False
+
     return subarucan.create_steering_control_angle(self.packer, apply_steer, lkas_request)
 
   def handle_torque_lateral(self, CC, CS):
