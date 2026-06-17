@@ -66,11 +66,13 @@ class CarController(CarControllerBase, SnGCarController):
     else:
       lkas_request_desired = False
 
+    over_mads_only_angle = not CC.enabled and abs(CS.out.steeringAngleDeg) >= MADS_ONLY_MAX_STEER_ANGLE
+
     releasing = False
     if lkas_request_desired:
       lkas_request = True
       self.release_frame_count = 0
-    elif self.lkas_request_last:
+    elif self.lkas_request_last and not over_mads_only_angle:
       releasing = True
       self.release_frame_count += 1
       angle_error = abs(self.apply_angle_last - CS.out.steeringAngleDeg)
