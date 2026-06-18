@@ -26,7 +26,7 @@ RELEASE_MAX_FRAMES = 50
 
 MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
-# LKAS_Output is signed int16 × -0.01 (max ±327.67°). Clamp with margin to prevent encode wrap
+# LKAS_Output encoding wraps at ±327.67°; drop lkas_request past this so EPS treats output as garbage
 SAFE_ANGLE_MAX = 320.0
 
 # Speed-dependent EMA alpha breakpoints (m/s, alpha). Lower alpha = more smoothing
@@ -118,7 +118,6 @@ class CarController(CarControllerBase, SnGCarController):
     self.lat_active_prev = CC.latActive
 
     if abs(apply_steer) > SAFE_ANGLE_MAX:
-      apply_steer = SAFE_ANGLE_MAX if apply_steer > 0 else -SAFE_ANGLE_MAX
       lkas_request = False
       self.lkas_request_last = False
 
