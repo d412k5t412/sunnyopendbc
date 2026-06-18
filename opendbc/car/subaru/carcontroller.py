@@ -115,6 +115,9 @@ class CarController(CarControllerBase, SnGCarController):
     else:
       apply_steer = CS.out.steeringAngleDeg
 
+    if CS.out.steeringPressed:
+      apply_steer = CS.out.steeringAngleDeg
+
     self.apply_angle_last = apply_steer
     self.lat_active_prev = CC.latActive
 
