@@ -48,6 +48,7 @@ class CarController(CarControllerBase, SnGCarController):
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
     self.es_disengage_frames = 1000
+    self.lkas_dash_disengage_frames = 1000
 
     self.p = CarControllerParams(CP)
     self.packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
@@ -207,8 +208,15 @@ class CarController(CarControllerBase, SnGCarController):
         self.es_disengage_frames = min(self.es_disengage_frames + 1, 1000)
       es_enabled = self.es_disengage_frames < 50 or (CS.out.brakePressed and self.es_disengage_frames < 500)
 
+      if self.lkas_request_last:
+        self.lkas_dash_disengage_frames = 0
+      else:
+        self.lkas_dash_disengage_frames = min(self.lkas_dash_disengage_frames + 1, 1000)
+
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
-        lkas_dash_active = self.lkas_request_last
+        lkas_dash_active = (self.lkas_request_last
+                           or self.lkas_dash_disengage_frames < 50
+                           or (CS.out.brakePressed and self.lkas_dash_disengage_frames < 500))
       else:
         lkas_dash_active = es_enabled
 
