@@ -17,7 +17,7 @@ ANGLE_ENGAGE_MAX_STEER_RATE = 2.0      # deg/s
 ANGLE_ENGAGE_RATE_SETTLE_FRAMES = 30   # 0.3 s at 100 Hz
 ANGLE_ENGAGE_MAX_ANGLE_DELTA = 3.0     # deg
 
-LOW_SPEED_ANGLE_HOLD_SPEED = 2.24  # m/s (5 mph)
+LOW_SPEED_ANGLE_HOLD_SPEED = 4.5   # m/s (10 mph)
 LOW_SPEED_MIN_ANGLE_DELTA = 0.3    # deg/cmd at standstill
 LOW_SPEED_MAX_ANGLE_DELTA = 3.0    # deg/cmd at threshold
 
@@ -26,9 +26,12 @@ RELEASE_MAX_FRAMES = 50
 
 MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
+# LKAS_Output is signed int16 × -0.01 (max ±327.67°). Clamp with margin to prevent encode wrap
 SAFE_ANGLE_MAX = 320.0
 
-LOW_SPEED_FILTER_ALPHA = 0.1  # EMA weight on new sample; lower = more smoothing
+# Speed-dependent EMA alpha breakpoints (m/s, alpha). Lower alpha = more smoothing
+LOW_SPEED_FILTER_ALPHA_BP = [0., 2.24, 4.5]
+LOW_SPEED_FILTER_ALPHA_V  = [0.03, 0.08, 0.20]
 
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
@@ -94,7 +97,8 @@ class CarController(CarControllerBase, SnGCarController):
       if self.filtered_angle_cmd is None:
         self.filtered_angle_cmd = apply_angle
       else:
-        self.filtered_angle_cmd += LOW_SPEED_FILTER_ALPHA * (apply_angle - self.filtered_angle_cmd)
+        alpha = float(np.interp(CS.out.vEgoRaw, LOW_SPEED_FILTER_ALPHA_BP, LOW_SPEED_FILTER_ALPHA_V))
+        self.filtered_angle_cmd += alpha * (apply_angle - self.filtered_angle_cmd)
       apply_angle = self.filtered_angle_cmd
 
       low_speed_delta = float(np.interp(CS.out.vEgoRaw, [0., LOW_SPEED_ANGLE_HOLD_SPEED],
