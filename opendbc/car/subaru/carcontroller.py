@@ -24,6 +24,10 @@ LOW_SPEED_MAX_ANGLE_DELTA = 3.0    # deg/cmd at threshold
 RELEASE_MAX_ANGLE_DELTA = 0.5
 RELEASE_MAX_FRAMES = 50
 
+# Planner-winddown detection: triggers graceful release when planner heads to zero faster than wheel can follow
+WINDDOWN_MAG_DECREASE = 0.2        # deg, planner abs magnitude drop vs apply_angle_last
+WINDDOWN_DIVERGENCE = 0.3          # deg, planner-vs-actual gap
+
 MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
 # LKAS_Output encoding wraps at ±327.67°; drop lkas_request past this so EPS treats output as garbage
@@ -69,6 +73,11 @@ class CarController(CarControllerBase, SnGCarController):
         angle_aligned = abs(CC.actuators.steeringAngleDeg - CS.out.steeringAngleDeg) < ANGLE_ENGAGE_MAX_ANGLE_DELTA
         lkas_request_desired = rate_settled and angle_aligned and mads_only_ok
     else:
+      lkas_request_desired = False
+
+    if (self.lkas_request_last
+        and abs(CC.actuators.steeringAngleDeg) < abs(self.apply_angle_last) - WINDDOWN_MAG_DECREASE
+        and abs(CC.actuators.steeringAngleDeg - CS.out.steeringAngleDeg) > WINDDOWN_DIVERGENCE):
       lkas_request_desired = False
 
     over_mads_only_angle = not CC.enabled and abs(CS.out.steeringAngleDeg) >= MADS_ONLY_MAX_STEER_ANGLE
