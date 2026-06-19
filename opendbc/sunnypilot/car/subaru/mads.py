@@ -46,6 +46,3 @@ class MadsCarState(MadsCarStateBase):
       self.lkas_button = cp_cam.vl["ES_LKAS_State"]["LKAS_Dash_State"]
 
     ret.buttonEvents = self.create_lkas_button_events(self.lkas_button, self.prev_lkas_button, {1: ButtonType.lkas})
-
-    if ret.brakePressed and ret.standstill:
-      ret.buttonEvents = [be for be in ret.buttonEvents if be.type != ButtonType.lkas]
