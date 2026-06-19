@@ -13,10 +13,6 @@ from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
-ANGLE_ENGAGE_MAX_STEER_RATE = 2.0      # deg/s
-ANGLE_ENGAGE_RATE_SETTLE_FRAMES = 30   # 0.3 s at 100 Hz
-ANGLE_ENGAGE_MAX_ANGLE_DELTA = 0.5     # deg
-
 LOW_SPEED_ANGLE_HOLD_SPEED = 4.5   # m/s (10 mph)
 LOW_SPEED_MIN_ANGLE_DELTA = 0.3    # deg/cmd at standstill
 LOW_SPEED_MAX_ANGLE_DELTA = 3.0    # deg/cmd at threshold
@@ -38,7 +34,6 @@ class CarController(CarControllerBase, SnGCarController):
     self.apply_angle_last = 0
     self.lat_active_prev = False
     self.lkas_request_last = False
-    self.last_high_steer_rate_frame = -ANGLE_ENGAGE_RATE_SETTLE_FRAMES
     self.release_frame_count = 0
     self.filtered_angle_cmd = None
 
@@ -54,17 +49,8 @@ class CarController(CarControllerBase, SnGCarController):
     if rising_edge:
       self.apply_angle_last = CS.out.steeringAngleDeg
 
-    if abs(CS.out.steeringRateDeg) > ANGLE_ENGAGE_MAX_STEER_RATE:
-      self.last_high_steer_rate_frame = self.frame
-
     if CC.latActive:
-      mads_only_ok = CC.enabled or abs(CS.out.steeringAngleDeg) < MADS_ONLY_MAX_STEER_ANGLE
-      if self.lkas_request_last:
-        lkas_request_desired = mads_only_ok
-      else:
-        rate_settled = (self.frame - self.last_high_steer_rate_frame) >= ANGLE_ENGAGE_RATE_SETTLE_FRAMES
-        angle_aligned = abs(CC.actuators.steeringAngleDeg - CS.out.steeringAngleDeg) < ANGLE_ENGAGE_MAX_ANGLE_DELTA
-        lkas_request_desired = rate_settled and angle_aligned and mads_only_ok
+      lkas_request_desired = CC.enabled or abs(CS.out.steeringAngleDeg) < MADS_ONLY_MAX_STEER_ANGLE
     else:
       lkas_request_desired = False
 
