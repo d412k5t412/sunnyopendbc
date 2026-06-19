@@ -13,7 +13,7 @@ from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
-LOW_SPEED_ANGLE_HOLD_SPEED = 4.5   # m/s (10 mph)
+LOW_SPEED_ANGLE_HOLD_SPEED = 6.0   # m/s (~13 mph)
 LOW_SPEED_MIN_ANGLE_DELTA = 0.3    # deg/cmd at standstill
 LOW_SPEED_MAX_ANGLE_DELTA = 3.0    # deg/cmd at threshold
 
@@ -23,8 +23,8 @@ RELEASE_MAX_FRAMES = 50
 MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
 # Speed-dependent EMA alpha breakpoints (m/s, alpha). Lower alpha = more smoothing
-LOW_SPEED_FILTER_ALPHA_BP = [0., 2.24, 4.5]
-LOW_SPEED_FILTER_ALPHA_V  = [0.03, 0.08, 0.20]
+LOW_SPEED_FILTER_ALPHA_BP = [0., 2.24, 4.5, 6.0]
+LOW_SPEED_FILTER_ALPHA_V  = [0.03, 0.08, 0.20, 0.50]
 
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
