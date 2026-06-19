@@ -15,7 +15,7 @@ MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
 ANGLE_ENGAGE_MAX_STEER_RATE = 2.0      # deg/s
 ANGLE_ENGAGE_RATE_SETTLE_FRAMES = 30   # 0.3 s at 100 Hz
-ANGLE_ENGAGE_MAX_ANGLE_DELTA = 3.0     # deg
+ANGLE_ENGAGE_MAX_ANGLE_DELTA = 0.5     # deg
 
 LOW_SPEED_ANGLE_HOLD_SPEED = 4.5   # m/s (10 mph)
 LOW_SPEED_MIN_ANGLE_DELTA = 0.3    # deg/cmd at standstill
