@@ -194,9 +194,9 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
 
   FLAGS = SubaruSafetyFlags.LKAS_ANGLE | SubaruSafetyFlags.GEN2
 
-  STEER_ANGLE_MAX = 545
+  STEER_ANGLE_MAX = 650
   # Avoid overflow of ES_LKAS_ANGLE's 17-bit signed field (0.01 deg resolution): limit test angles
-  STEER_ANGLE_TEST_MAX = 545
+  STEER_ANGLE_TEST_MAX = 650
   ANGLE_RATE_BP = [0, 5, 35]
   ANGLE_RATE_UP = [5, 0.8, 0.15]
   ANGLE_RATE_DOWN = [5, 0.8, 0.15]
