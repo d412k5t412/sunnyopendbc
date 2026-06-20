@@ -24,7 +24,7 @@ MADS_ONLY_MAX_STEER_ANGLE = 120.0
 
 # Speed-dependent EMA alpha breakpoints (m/s, alpha). Lower alpha = more smoothing
 LOW_SPEED_FILTER_ALPHA_BP = [0., 2.24, 4.5, 6.0]
-LOW_SPEED_FILTER_ALPHA_V  = [0.03, 0.08, 0.20, 0.50]
+LOW_SPEED_FILTER_ALPHA_V  = [0.08, 0.12, 0.20, 0.50]
 
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
