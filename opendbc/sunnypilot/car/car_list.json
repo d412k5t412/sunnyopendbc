@@ -3129,6 +3129,16 @@
     ],
     "package": "All"
   },
+  "Subaru Outback 2023": {
+    "platform": "SUBARU_OUTBACK_2023",
+    "make": "Subaru",
+    "brand": "subaru",
+    "model": "Outback",
+    "year": [
+      "2023"
+    ],
+    "package": "All"
+  },
   "Subaru XV 2018-19": {
     "platform": "SUBARU_IMPREZA",
     "make": "Subaru",
