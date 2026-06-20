@@ -132,9 +132,7 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
 
   if ((msg->addr == MSG_SUBARU_ES_LKAS_State) && (msg->bus == SUBARU_CAM_BUS)) {
     int lkas_hud = (msg->data[2] & 0x0CU) >> 2U;
-    if ((lkas_hud >= 1) && (lkas_hud <= 3)) {
-      mads_button_press = MADS_BUTTON_PRESSED;
-    }
+    mads_button_press = ((lkas_hud >= 1) && (lkas_hud <= 3)) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
   }
 
   if (subaru_lkas_angle) {
