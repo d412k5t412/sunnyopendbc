@@ -18,6 +18,7 @@ LOW_SPEED_MIN_ANGLE_DELTA = 0.3    # deg/cmd at standstill
 LOW_SPEED_MAX_ANGLE_DELTA = 3.0    # deg/cmd at threshold
 
 MADS_ONLY_MAX_STEER_ANGLE = 120.0
+MAX_ANGLE_ERROR = 4.0
 
 # Speed-dependent EMA alpha breakpoints (m/s, alpha). Lower alpha = more smoothing
 LOW_SPEED_FILTER_ALPHA_BP = [0., 2.24, 4.5, 6.0]
@@ -71,6 +72,11 @@ class CarController(CarControllerBase, SnGCarController):
 
     apply_steer = apply_std_steer_angle_limits(apply_angle, self.apply_angle_last, CS.out.vEgoRaw,
                                                CS.out.steeringAngleDeg, CC.latActive, self.p.ANGLE_LIMITS)
+
+    if CC.latActive:
+      apply_steer = float(np.clip(apply_steer,
+                                  CS.out.steeringAngleDeg - MAX_ANGLE_ERROR,
+                                  CS.out.steeringAngleDeg + MAX_ANGLE_ERROR))
 
     self.apply_angle_last = apply_steer
     self.lat_active_prev = CC.latActive
