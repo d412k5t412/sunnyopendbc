@@ -73,10 +73,9 @@ class CarController(CarControllerBase, SnGCarController):
     apply_steer = apply_std_steer_angle_limits(apply_angle, self.apply_angle_last, CS.out.vEgoRaw,
                                                CS.out.steeringAngleDeg, CC.latActive, self.p.ANGLE_LIMITS)
 
-    if CC.latActive:
-      apply_steer = float(np.clip(apply_steer,
-                                  CS.out.steeringAngleDeg - MAX_ANGLE_ERROR,
-                                  CS.out.steeringAngleDeg + MAX_ANGLE_ERROR))
+    if CC.latActive and abs(apply_steer - CS.out.steeringAngleDeg) > MAX_ANGLE_ERROR:
+      lkas_request = False
+      apply_steer = CS.out.steeringAngleDeg
 
     self.apply_angle_last = apply_steer
     self.lat_active_prev = CC.latActive
