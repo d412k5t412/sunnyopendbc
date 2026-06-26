@@ -2,10 +2,11 @@ import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, make_tester_present_msg
 from opendbc.car.lateral import (apply_driver_steer_torque_limits, apply_std_steer_angle_limits,
-                                 common_fault_avoidance)
+                                 apply_steer_angle_limits_vm, common_fault_avoidance)
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.subaru import subarucan
 from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
+from opendbc.car.vehicle_model import VehicleModel
 
 from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 
@@ -16,11 +17,12 @@ MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
 LOW_SPEED_HANDOFF = 1.0   # m/s (~2 mph)   below: command measured (LKAS off)
 LOW_SPEED_BLEND   = 5.0   # m/s (~11 mph)  above: full planner authority
-DRIVER_OVERRIDE_TORQUE        = 120   # raw Steering_Torque sensor units (engage)
-DRIVER_OVERRIDE_TORQUE_RELEASE = 70   # below this for SUSPEND_HOLD_FRAMES = release
-MADS_ONLY_MAX_STEER_ANGLE = 120.0  # degrees
-SUSPEND_HOLD_FRAMES = 25          # ~0.5 s at 50 Hz STEER_STEP
-REACTIVATION_RAMP_FRAMES = 35     # ~0.7 s at 50 Hz STEER_STEP
+DRIVER_OVERRIDE_TORQUE        = 85    # raw Steering_Torque sensor units (engage)
+DRIVER_OVERRIDE_TORQUE_RELEASE = 50   # below this for SUSPEND_HOLD_FRAMES = release
+MADS_ONLY_MAX_STEER_ANGLE = 60.0   # degrees - bound MADS-only authority well under runaway range
+SUSPEND_HOLD_FRAMES = 25           # ~0.5 s at 50 Hz STEER_STEP
+REACTIVATION_RAMP_FRAMES = 35      # ~0.7 s at 50 Hz STEER_STEP
+PLANNER_ANGLE_LP_ALPHA = 0.4
 
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
@@ -28,6 +30,7 @@ class CarController(CarControllerBase, SnGCarController):
     SnGCarController.__init__(self, CP, CP_SP)
     self.apply_torque_last = 0
     self.apply_angle_last = 0
+    self.planner_angle_filt = 0.0
     self.suspended = False
     self.below_release_count = 0
     self.frames_since_resume = REACTIVATION_RAMP_FRAMES  # start with no ramp
@@ -38,6 +41,8 @@ class CarController(CarControllerBase, SnGCarController):
 
     self.p = CarControllerParams(CP)
     self.packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+
+    self.VM = VehicleModel(CP)
 
   def handle_angle_lateral(self, CC, CS):
     torque = abs(CS.out.steeringTorque)
@@ -64,7 +69,10 @@ class CarController(CarControllerBase, SnGCarController):
       self.frames_since_resume += 1
 
     if active:
-      planner_angle = CC.actuators.steeringAngleDeg
+      planner_angle = (PLANNER_ANGLE_LP_ALPHA * CC.actuators.steeringAngleDeg +
+                       (1.0 - PLANNER_ANGLE_LP_ALPHA) * self.planner_angle_filt)
+      self.planner_angle_filt = planner_angle
+
       v = CS.out.vEgoRaw
       if v < LOW_SPEED_HANDOFF:
         speed_w = 0.0
@@ -76,9 +84,13 @@ class CarController(CarControllerBase, SnGCarController):
       w = speed_w * ramp_w
       apply_angle = w * planner_angle + (1.0 - w) * CS.out.steeringAngleDeg
     else:
+      self.planner_angle_filt = CS.out.steeringAngleDeg
       apply_angle = CS.out.steeringAngleDeg
 
-    apply_steer = apply_std_steer_angle_limits(apply_angle, self.apply_angle_last, CS.out.vEgoRaw,
+    apply_steer = apply_steer_angle_limits_vm(apply_angle, self.apply_angle_last, CS.out.vEgoRaw,
+                                              CS.out.steeringAngleDeg, active, self.p, self.VM)
+
+    apply_steer = apply_std_steer_angle_limits(apply_steer, self.apply_angle_last, CS.out.vEgoRaw,
                                                CS.out.steeringAngleDeg, active, self.p.ANGLE_LIMITS)
 
     self.apply_angle_last = apply_steer
