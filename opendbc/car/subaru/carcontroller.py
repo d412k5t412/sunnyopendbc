@@ -16,9 +16,9 @@ MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
 LOW_SPEED_HANDOFF = 1.0   # m/s (~2 mph)   below: command measured (LKAS off)
-LOW_SPEED_BLEND   = 5.0   # m/s (~11 mph)  above: full planner authority
-DRIVER_OVERRIDE_TORQUE        = 85    # raw Steering_Torque sensor units (engage)
-DRIVER_OVERRIDE_TORQUE_RELEASE = 50   # below this for SUSPEND_HOLD_FRAMES = release
+LOW_SPEED_BLEND = 5.0   # m/s (~11 mph)  above: full planner authority
+DRIVER_OVERRIDE_TORQUE = 120    # raw Steering_Torque sensor units (engage)
+DRIVER_OVERRIDE_TORQUE_RELEASE = 70   # below this for SUSPEND_HOLD_FRAMES = release
 MADS_ONLY_MAX_STEER_ANGLE = 60.0   # degrees - bound MADS-only authority well under runaway range
 SUSPEND_HOLD_FRAMES = 25           # ~0.5 s at 50 Hz STEER_STEP
 REACTIVATION_RAMP_FRAMES = 35      # ~0.7 s at 50 Hz STEER_STEP
