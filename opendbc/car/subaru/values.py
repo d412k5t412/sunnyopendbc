@@ -1,13 +1,15 @@
 from dataclasses import dataclass, field
 from enum import Enum, IntFlag
 
-from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
+from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
+from opendbc.car.lateral import AngleSteeringLimits, ISO_LATERAL_ACCEL
 from opendbc.car.structs import CarParams
 from opendbc.car.docs_definitions import CarFootnote, CarHarness, CarDocs, CarParts, Column
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries, p16
 
 Ecu = CarParams.Ecu
 
+AVERAGE_ROAD_ROLL = 0.06
 
 class CarControllerParams:
   def __init__(self, CP):
@@ -17,6 +19,15 @@ class CarControllerParams:
     self.STEER_DRIVER_ALLOWANCE = 60   # allowed driver torque before start limiting
     self.STEER_DRIVER_MULTIPLIER = 50  # weight driver torque heavily
     self.STEER_DRIVER_FACTOR = 1       # from dbc
+
+    self.ANGLE_LIMITS: AngleSteeringLimits = AngleSteeringLimits(
+      STEER_ANGLE_MAX=600,  # leave headroom under the ~650 deg EPS fault threshold
+      ANGLE_RATE_LIMIT_UP=([0., 5., 15., 35.], [5., 0.65, 0.40, 0.15]),
+      ANGLE_RATE_LIMIT_DOWN=([0., 5., 15., 35.], [5., 0.75, 0.45, 0.15]),
+      MAX_LATERAL_ACCEL=ISO_LATERAL_ACCEL + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),  # ~3.6 m/s^2
+      MAX_LATERAL_JERK=3.0 + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),                  # ~3.6 m/s^3
+      MAX_ANGLE_RATE=2.0,  # deg / 20ms = 100 deg/s ceiling at low speed for comfort/fault prevention
+    )
 
     if CP.flags & SubaruFlags.GLOBAL_GEN2:
       self.STEER_MAX = 1500
@@ -56,6 +67,7 @@ class SubaruSafetyFlags(IntFlag):
   GEN2 = 1
   LONG = 2
   PREGLOBAL_REVERSED_DRIVER_TORQUE = 4
+  LKAS_ANGLE = 8
 
 
 class SubaruFlags(IntFlag):
