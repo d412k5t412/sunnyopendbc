@@ -19,7 +19,6 @@ class CarState(CarStateBase, MadsCarState, SnGCarState):
     self.shifter_values = can_define.dv["Transmission"]["Gear"]
 
     self.angle_rate_calulator = CanSignalRateCalculator(50)
-    self.ready = True
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
