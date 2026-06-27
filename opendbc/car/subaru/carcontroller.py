@@ -1,8 +1,8 @@
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, make_tester_present_msg
-from opendbc.car.lateral import (apply_driver_steer_torque_limits, apply_std_steer_angle_limits,
-                                 apply_steer_angle_limits_vm, common_fault_avoidance)
+from opendbc.car.lateral import (apply_driver_steer_torque_limits, apply_steer_angle_limits_vm,
+                                 common_fault_avoidance)
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.subaru import subarucan
 from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
@@ -24,6 +24,10 @@ SUSPEND_HOLD_FRAMES = 25           # ~0.5 s at 50 Hz STEER_STEP
 REACTIVATION_RAMP_FRAMES = 35      # ~0.7 s at 50 Hz STEER_STEP
 PLANNER_ANGLE_LP_ALPHA = 0.7
 
+ES_DISENGAGE_MAX_FRAMES = 1000      # cap on disengage counter (~10 s at 100 Hz)
+ES_DISENGAGE_HOLD_FRAMES = 50       # keep ES dash alive briefly after disengage
+ES_DISENGAGE_BRAKE_HOLD_FRAMES = 500  # extended hold while brake pressed
+
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
     CarControllerBase.__init__(self, dbc_names, CP, CP_SP)
@@ -37,7 +41,7 @@ class CarController(CarControllerBase, SnGCarController):
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
-    self.es_disengage_frames = 1000
+    self.es_disengage_frames = ES_DISENGAGE_MAX_FRAMES
 
     self.p = CarControllerParams(CP)
     self.packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
@@ -46,22 +50,17 @@ class CarController(CarControllerBase, SnGCarController):
 
   def handle_angle_lateral(self, CC, CS):
     torque = abs(CS.out.steeringTorque)
-    extreme_angle = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE
-    extreme_angle_mads_only = extreme_angle and not CC.enabled
+    extreme_angle_mads_only = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE and not CC.enabled
 
-    if self.suspended:
-      if torque < DRIVER_OVERRIDE_TORQUE_RELEASE and not extreme_angle_mads_only:
-        self.below_release_count += 1
-        if self.below_release_count >= SUSPEND_HOLD_FRAMES:
-          self.suspended = False
-          self.below_release_count = 0
-          self.frames_since_resume = 0
-      else:
-        self.below_release_count = 0
-    else:
-      if torque > DRIVER_OVERRIDE_TORQUE or extreme_angle_mads_only:
-        self.suspended = True
-        self.below_release_count = 0
+    # suspend on driver override or extreme angle in MADS-only; release after sustained low torque
+    if torque > DRIVER_OVERRIDE_TORQUE or extreme_angle_mads_only:
+      self.suspended = True
+      self.below_release_count = 0
+    elif self.suspended and torque < DRIVER_OVERRIDE_TORQUE_RELEASE:
+      self.below_release_count += 1
+      if self.below_release_count >= SUSPEND_HOLD_FRAMES:
+        self.suspended = False
+        self.frames_since_resume = 0
 
     active = CC.latActive and not self.suspended
 
@@ -73,13 +72,7 @@ class CarController(CarControllerBase, SnGCarController):
                        (1.0 - PLANNER_ANGLE_LP_ALPHA) * self.planner_angle_filt)
       self.planner_angle_filt = planner_angle
 
-      v = CS.out.vEgoRaw
-      if v < LOW_SPEED_HANDOFF:
-        speed_w = 0.0
-      elif v < LOW_SPEED_BLEND:
-        speed_w = (v - LOW_SPEED_HANDOFF) / (LOW_SPEED_BLEND - LOW_SPEED_HANDOFF)
-      else:
-        speed_w = 1.0
+      speed_w = float(np.interp(CS.out.vEgoRaw, [LOW_SPEED_HANDOFF, LOW_SPEED_BLEND], [0.0, 1.0]))
       ramp_w = min(1.0, self.frames_since_resume / REACTIVATION_RAMP_FRAMES)
       w = speed_w * ramp_w
       apply_angle = w * planner_angle + (1.0 - w) * CS.out.steeringAngleDeg
@@ -89,39 +82,30 @@ class CarController(CarControllerBase, SnGCarController):
 
     apply_steer = apply_steer_angle_limits_vm(apply_angle, self.apply_angle_last, CS.out.vEgoRaw,
                                               CS.out.steeringAngleDeg, active, self.p, self.VM)
-
-    apply_steer = apply_std_steer_angle_limits(apply_steer, self.apply_angle_last, CS.out.vEgoRaw,
-                                               CS.out.steeringAngleDeg, active, self.p.ANGLE_LIMITS)
-
     self.apply_angle_last = apply_steer
 
     return subarucan.create_steering_control_angle(self.packer, apply_steer, active)
 
   def handle_torque_lateral(self, CC, CS):
     apply_torque = int(round(CC.actuators.torque * self.p.STEER_MAX))
-
-    new_torque = int(round(apply_torque))
-    apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.p)
+    apply_torque = apply_driver_steer_torque_limits(apply_torque, self.apply_torque_last, CS.out.steeringTorque, self.p)
 
     if not CC.latActive:
       apply_torque = 0
 
-    msg = None
-    if self.CP.flags & SubaruFlags.PREGLOBAL:
-      msg = subarucan.create_preglobal_steering_control(self.packer, self.frame // self.p.STEER_STEP, apply_torque, CC.latActive)
-    else:
-      apply_steer_req = CC.latActive
-
-      if self.CP.flags & SubaruFlags.STEER_RATE_LIMITED:
-        # Steering rate fault prevention
-        self.steer_rate_counter, apply_steer_req = \
-          common_fault_avoidance(abs(CS.out.steeringRateDeg) > MAX_STEER_RATE, apply_steer_req,
-                                self.steer_rate_counter, MAX_STEER_RATE_FRAMES)
-
-      msg = subarucan.create_steering_control(self.packer, apply_torque, apply_steer_req)
-
     self.apply_torque_last = apply_torque
-    return msg
+
+    if self.CP.flags & SubaruFlags.PREGLOBAL:
+      return subarucan.create_preglobal_steering_control(self.packer, self.frame // self.p.STEER_STEP, apply_torque, CC.latActive)
+
+    apply_steer_req = CC.latActive
+    if self.CP.flags & SubaruFlags.STEER_RATE_LIMITED:
+      # Steering rate fault prevention
+      self.steer_rate_counter, apply_steer_req = \
+        common_fault_avoidance(abs(CS.out.steeringRateDeg) > MAX_STEER_RATE, apply_steer_req,
+                               self.steer_rate_counter, MAX_STEER_RATE_FRAMES)
+
+    return subarucan.create_steering_control(self.packer, apply_torque, apply_steer_req)
 
   def update(self, CC, CC_SP, CS, now_nanos):
     actuators = CC.actuators
@@ -177,8 +161,9 @@ class CarController(CarControllerBase, SnGCarController):
       if CC.enabled:
         self.es_disengage_frames = 0
       else:
-        self.es_disengage_frames = min(self.es_disengage_frames + 1, 1000)
-      es_enabled = self.es_disengage_frames < 50 or (CS.out.brakePressed and self.es_disengage_frames < 500)
+        self.es_disengage_frames = min(self.es_disengage_frames + 1, ES_DISENGAGE_MAX_FRAMES)
+      es_enabled = (self.es_disengage_frames < ES_DISENGAGE_HOLD_FRAMES or
+                    (CS.out.brakePressed and self.es_disengage_frames < ES_DISENGAGE_BRAKE_HOLD_FRAMES))
 
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
         lkas_dash_active = not CS.out.steerFaultPermanent and CC.latActive

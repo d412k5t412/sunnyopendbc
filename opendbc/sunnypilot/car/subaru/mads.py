@@ -51,12 +51,9 @@ class MadsCarState(MadsCarStateBase):
     if not self.CP.flags & SubaruFlags.PREGLOBAL:
       raw_btn = int(cp_cam.vl["ES_LKAS_State"]["LKAS_Dash_State"])
 
-      if raw_btn != self._lkas_button_stable:
-        self._lkas_button_debounce += 1
-        if self._lkas_button_debounce >= LKAS_DASH_STATE_DEBOUNCE_FRAMES:
-          self._lkas_button_stable = raw_btn
-          self._lkas_button_debounce = 0
-      else:
+      self._lkas_button_debounce = self._lkas_button_debounce + 1 if raw_btn != self._lkas_button_stable else 0
+      if self._lkas_button_debounce >= LKAS_DASH_STATE_DEBOUNCE_FRAMES:
+        self._lkas_button_stable = raw_btn
         self._lkas_button_debounce = 0
 
       self.lkas_button = self._lkas_button_stable

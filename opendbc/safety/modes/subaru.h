@@ -113,19 +113,15 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
   const unsigned int alt_main_bus = subaru_gen2 ? SUBARU_ALT_BUS : SUBARU_MAIN_BUS;
   const unsigned int lkas_angle_cruise_bus = subaru_gen2 ? SUBARU_ALT_BUS : SUBARU_CAM_BUS;
 
-  if (subaru_lkas_angle) {
-    if ((msg->addr == MSG_SUBARU_Steering_2) && (msg->bus == SUBARU_MAIN_BUS)) {
-      uint32_t raw = GET_BYTES(msg, 3, 3);
-      raw &= 0x1FFFFU;
-      int angle_meas_new = -to_signed(raw, 17);
-      update_sample(&angle_meas, angle_meas_new);
-    }
-  } 
-  
-  // non-zero, even for Angle-LKAS cars
+  if (subaru_lkas_angle && (msg->addr == MSG_SUBARU_Steering_2) && (msg->bus == SUBARU_MAIN_BUS)) {
+    uint32_t raw = GET_BYTES(msg, 3, 3) & 0x1FFFFU;
+    int angle_meas_new = -to_signed(raw, 17);
+    update_sample(&angle_meas, angle_meas_new);
+  }
+
+  // Steering_Torque is non-zero even for Angle-LKAS cars
   if ((msg->addr == MSG_SUBARU_Steering_Torque) && (msg->bus == SUBARU_MAIN_BUS)) {
-    int torque_driver_new;
-    torque_driver_new = ((GET_BYTES(msg, 0, 4) >> 16) & 0x7FFU);
+    int torque_driver_new = ((GET_BYTES(msg, 0, 4) >> 16) & 0x7FFU);
     torque_driver_new = -1 * to_signed(torque_driver_new, 11);
     update_sample(&torque_driver, torque_driver_new);
   }
@@ -135,6 +131,7 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     mads_button_press = ((lkas_hud >= 1) && (lkas_hud <= 3)) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
   }
 
+  // enter controls on rising edge of ACC, exit controls on ACC off
   if (subaru_lkas_angle) {
     if ((msg->addr == MSG_SUBARU_ES_Brake) && (msg->bus == lkas_angle_cruise_bus)) {
       bool cruise_engaged = (msg->data[4] >> 7) & 1U;
@@ -143,20 +140,10 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     if ((msg->addr == MSG_SUBARU_ES_DashStatus) && (msg->bus == SUBARU_CAM_BUS)) {
       acc_main_on = GET_BIT(msg, 49U);
     }
-  } else {
-    // enter controls on rising edge of ACC, exit controls on ACC off
-    if ((msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
-      bool cruise_engaged = (msg->data[5] >> 1) & 1U;
-      pcm_cruise_check(cruise_engaged);
-    }
-  }
-
-  if ((msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
-    if (!subaru_lkas_angle) {
-      bool cruise_engaged = (msg->data[5] >> 1) & 1U;
-      pcm_cruise_check(cruise_engaged);
-      acc_main_on = GET_BIT(msg, 40U);
-    }
+  } else if ((msg->addr == MSG_SUBARU_CruiseControl) && (msg->bus == alt_main_bus)) {
+    bool cruise_engaged = (msg->data[5] >> 1) & 1U;
+    pcm_cruise_check(cruise_engaged);
+    acc_main_on = GET_BIT(msg, 40U);
   }
 
   // update vehicle moving with any non-zero wheel speed
