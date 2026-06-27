@@ -22,8 +22,8 @@ class CarControllerParams:
 
     self.ANGLE_LIMITS: AngleSteeringLimits = AngleSteeringLimits(
       STEER_ANGLE_MAX=600,  # leave headroom under the ~650 deg EPS fault threshold
-      ANGLE_RATE_LIMIT_UP=([0., 5., 15., 35.], [5., 0.50, 0.30, 0.15]),
-      ANGLE_RATE_LIMIT_DOWN=([0., 5., 15., 35.], [5., 0.60, 0.35, 0.15]),
+      ANGLE_RATE_LIMIT_UP=([0., 5., 15., 35.], [5., 0.65, 0.40, 0.15]),
+      ANGLE_RATE_LIMIT_DOWN=([0., 5., 15., 35.], [5., 0.75, 0.45, 0.15]),
       MAX_LATERAL_ACCEL=ISO_LATERAL_ACCEL + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),  # ~3.6 m/s^2
       MAX_LATERAL_JERK=3.0 + (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL),                  # ~3.6 m/s^3
       MAX_ANGLE_RATE=2.0,  # deg / 20ms = 100 deg/s ceiling at low speed for comfort/fault prevention
