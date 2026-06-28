@@ -22,6 +22,8 @@ DRIVER_OVERRIDE_TORQUE_RELEASE = 70   # below this for SUSPEND_HOLD_FRAMES = rel
 MADS_ONLY_MAX_STEER_ANGLE = 90.0   # degrees
 SUSPEND_HOLD_FRAMES = 25           # ~0.5 s at 50 Hz STEER_STEP
 REACTIVATION_RAMP_FRAMES = 35      # ~0.7 s at 50 Hz STEER_STEP
+PRE_ENGAGE_CLEAN_FRAMES = 5        # ~100 ms of low driver torque required before fresh engagement
+DISENGAGE_TAPER_FRAMES = 8         # ~160 ms taper on LKAS_Request fall to avoid eyesight watchdog trip
 PLANNER_ANGLE_LP_ALPHA = 0.7
 
 class CarController(CarControllerBase, SnGCarController):
@@ -34,6 +36,9 @@ class CarController(CarControllerBase, SnGCarController):
     self.suspended = False
     self.below_release_count = 0
     self.frames_since_resume = REACTIVATION_RAMP_FRAMES  # start with no ramp
+    self.pre_engage_clean_frames = 0
+    self.disengage_taper_remaining = 0
+    self.active_last = False
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
@@ -49,6 +54,12 @@ class CarController(CarControllerBase, SnGCarController):
     extreme_angle = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE
     extreme_angle_mads_only = extreme_angle and not CC.enabled
 
+    if torque < DRIVER_OVERRIDE_TORQUE_RELEASE and not extreme_angle_mads_only:
+      self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, PRE_ENGAGE_CLEAN_FRAMES)
+    else:
+      self.pre_engage_clean_frames = 0
+    pre_engage_ok = self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
+
     if self.suspended:
       if torque < DRIVER_OVERRIDE_TORQUE_RELEASE and not extreme_angle_mads_only:
         self.below_release_count += 1
@@ -63,9 +74,18 @@ class CarController(CarControllerBase, SnGCarController):
         self.suspended = True
         self.below_release_count = 0
 
-    active = CC.latActive and not self.suspended
+    want_active = CC.latActive and not self.suspended
+    if want_active and not self.active_last and not pre_engage_ok:
+      want_active = False
 
-    if active and self.frames_since_resume < REACTIVATION_RAMP_FRAMES:
+    if want_active:
+      self.disengage_taper_remaining = DISENGAGE_TAPER_FRAMES
+    elif self.disengage_taper_remaining > 0:
+      self.disengage_taper_remaining -= 1
+
+    active = want_active or self.disengage_taper_remaining > 0
+
+    if want_active and self.frames_since_resume < REACTIVATION_RAMP_FRAMES:
       self.frames_since_resume += 1
 
     if active:
@@ -80,7 +100,12 @@ class CarController(CarControllerBase, SnGCarController):
         speed_w = (v - LOW_SPEED_HANDOFF) / (LOW_SPEED_BLEND - LOW_SPEED_HANDOFF)
       else:
         speed_w = 1.0
-      ramp_w = min(1.0, self.frames_since_resume / REACTIVATION_RAMP_FRAMES)
+
+      if want_active:
+        ramp_w = min(1.0, self.frames_since_resume / REACTIVATION_RAMP_FRAMES)
+      else:
+        ramp_w = self.disengage_taper_remaining / DISENGAGE_TAPER_FRAMES
+
       w = speed_w * ramp_w
       apply_angle = w * planner_angle + (1.0 - w) * CS.out.steeringAngleDeg
     else:
@@ -94,6 +119,7 @@ class CarController(CarControllerBase, SnGCarController):
                                                CS.out.steeringAngleDeg, active, self.p.ANGLE_LIMITS)
 
     self.apply_angle_last = apply_steer
+    self.active_last = active
 
     return subarucan.create_steering_control_angle(self.packer, apply_steer, active)
 
