@@ -19,7 +19,7 @@ LOW_SPEED_HANDOFF = 1.0   # m/s (~2 mph)   below: command measured (LKAS off)
 LOW_SPEED_BLEND = 5.0   # m/s (~11 mph)  above: full planner authority
 DRIVER_OVERRIDE_TORQUE = 120    # raw Steering_Torque sensor units (engage)
 DRIVER_OVERRIDE_TORQUE_RELEASE = 70   # below this for SUSPEND_HOLD_FRAMES = release
-MADS_ONLY_MAX_STEER_ANGLE = 90.0   # degrees
+MADS_ONLY_MAX_STEER_ANGLE = 120   # degrees
 SUSPEND_HOLD_FRAMES = 25           # ~0.5 s at 50 Hz STEER_STEP
 REACTIVATION_RAMP_FRAMES = 35      # ~0.7 s at 50 Hz STEER_STEP
 PRE_ENGAGE_CLEAN_FRAMES = 5        # ~100 ms of low driver torque required before fresh engagement
