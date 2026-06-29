@@ -78,6 +78,11 @@ class CarController(CarControllerBase, SnGCarController):
     if want_active and not self.active_last and not pre_engage_ok:
       want_active = False
 
+    if want_active and not self.active_last:
+      self.frames_since_resume = 0
+      self.planner_angle_filt = CS.out.steeringAngleDeg
+      self.apply_angle_last = CS.out.steeringAngleDeg
+
     if want_active:
       self.disengage_taper_remaining = DISENGAGE_TAPER_FRAMES
     elif self.disengage_taper_remaining > 0:
