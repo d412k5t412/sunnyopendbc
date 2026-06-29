@@ -79,9 +79,7 @@
   {.msg = {{MSG_SUBARU_CruiseControl,   alt_bus,         8, 20U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
   {.msg = {{MSG_SUBARU_ES_LKAS_State,   SUBARU_CAM_BUS,  8, 10U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
 
-// LKAS_ANGLE cars don't use CruiseControl for ACC engagement; they use ES_Brake/ES_DashStatus
-// and need Steering_2 for angle measurement. Throttle/Steering_Torque/Wheel_Speeds/Brake_Status
-// share the existing source buses.
+// LKAS_ANGLE: ACC engagement via ES_Brake/ES_DashStatus (not CruiseControl); needs Steering_2 for angle.
 #define SUBARU_LKAS_ANGLE_RX_CHECKS(alt_main_bus, es_brake_bus)                                                                       \
   {.msg = {{MSG_SUBARU_Throttle,        SUBARU_MAIN_BUS, 8, 100U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
   {.msg = {{MSG_SUBARU_Steering_Torque, SUBARU_MAIN_BUS, 8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
@@ -116,8 +114,7 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
   const unsigned int alt_main_bus = subaru_gen2 ? SUBARU_ALT_BUS : SUBARU_MAIN_BUS;
   const unsigned int es_brake_bus = subaru_gen2 ? SUBARU_ALT_BUS : SUBARU_CAM_BUS;
 
-  // Steering_Torque carries the driver torque on all platforms (also on LKAS_ANGLE cars,
-  // where the EPS still publishes a non-zero driver torque reading).
+  // Steering_Torque carries driver torque on all platforms (incl. LKAS_ANGLE).
   if ((msg->addr == MSG_SUBARU_Steering_Torque) && (msg->bus == SUBARU_MAIN_BUS)) {
     int torque_driver_new;
     torque_driver_new = ((GET_BYTES(msg, 0, 4) >> 16) & 0x7FFU);
@@ -125,7 +122,7 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     update_sample(&torque_driver, torque_driver_new);
   }
 
-  // Measured steering angle for LKAS_ANGLE cars (Steering_2.Steering_Angle, signed 17-bit at -0.01 deg/LSB)
+  // LKAS_ANGLE measured angle: Steering_2.Steering_Angle, signed 17-bit at -0.01 deg/LSB
   if (subaru_lkas_angle && (msg->addr == MSG_SUBARU_Steering_2) && (msg->bus == SUBARU_MAIN_BUS)) {
     int angle_meas_new = (GET_BYTES(msg, 3, 3) & 0x1FFFFU);
     angle_meas_new = -1 * to_signed(angle_meas_new, 17);
@@ -139,8 +136,7 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // ACC engagement / main-switch sourcing differs between torque cars (CruiseControl) and
-  // LKAS_ANGLE cars (ES_Brake for engaged, ES_DashStatus for main-on).
+  // ACC engagement: torque cars use CruiseControl; LKAS_ANGLE uses ES_Brake (engaged) + ES_DashStatus (main).
   if (subaru_lkas_angle) {
     if ((msg->addr == MSG_SUBARU_ES_Brake) && (msg->bus == es_brake_bus)) {
       bool cruise_engaged = (msg->data[4] >> 7) & 1U;
@@ -183,17 +179,18 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits SUBARU_STEERING_LIMITS      = SUBARU_STEERING_LIMITS_GENERATOR(2047, 50, 70);
   const TorqueSteeringLimits SUBARU_GEN2_STEERING_LIMITS = SUBARU_STEERING_LIMITS_GENERATOR(1500, 35, 50);
 
-  // Mirrors CarControllerParams.ANGLE_LIMITS in opendbc/car/subaru/values.py. EPS faults above ~650 deg.
+  // 3-point envelope >= controller's 5-point ANGLE_LIMITS (cross-checked at 0/0.5/2/10/20 m/s).
+  // max_angle 720 deg passes driver-side full-lock without rejection cascading to an EyeSight fault.
   const AngleSteeringLimits SUBARU_ANGLE_STEERING_LIMITS = {
-    .max_angle = 650 * 100,        // 17-bit signed at 0.01 deg/LSB
+    .max_angle = 720 * 100,
     .angle_deg_to_can = 100.,
     .angle_rate_up_lookup = {
       {0., 5., 35.},
-      {5., 0.8, 0.15},
+      {1.5, 0.6, 0.15},
     },
     .angle_rate_down_lookup = {
       {0., 5., 35.},
-      {5., 0.8, 0.15},
+      {2.0, 0.8, 0.20},      // ~30% looser than UP
     },
   };
 

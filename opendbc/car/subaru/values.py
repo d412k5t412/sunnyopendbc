@@ -11,13 +11,14 @@ Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
-  # LKAS_ANGLE: ES_LKAS_ANGLE 0x124 LKAS_Output is signed 17-bit at 0.01 deg/LSB (range +/-655.36 deg).
-  # We leave headroom below the EPS fault threshold (~650 deg measured). Speed-dependent rate limits
-  # are matched to the safety hooks in opendbc/safety/modes/subaru.h SUBARU_ANGLE_STEERING_LIMITS.
+  # LKAS_ANGLE: ES_LKAS_ANGLE.LKAS_Output is signed 17-bit at 0.01 deg/LSB.
+  # STEER_ANGLE_MAX = 700 deg tracks Subaru full-lock; safety cap in subaru.h is 720 deg.
+  # Rates are deg per STEER_STEP (20 ms). DOWN ~30% looser than UP — unwinding is naturally
+  # lower-jerk than winding in.
   ANGLE_LIMITS = AngleSteeringLimits(
-    STEER_ANGLE_MAX=600,
-    ANGLE_RATE_LIMIT_UP=([0., 5., 35.], [5., 0.8, 0.15]),
-    ANGLE_RATE_LIMIT_DOWN=([0., 5., 35.], [5., 0.8, 0.15]),
+    STEER_ANGLE_MAX=700,
+    ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [0.8, 0.7, 0.5, 0.30, 0.15]),
+    ANGLE_RATE_LIMIT_DOWN=([0., 1.5, 5., 15., 35.], [1.1, 1.0, 0.7, 0.40, 0.20]),
   )
 
   def __init__(self, CP):

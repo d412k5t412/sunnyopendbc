@@ -14,8 +14,7 @@ def create_steering_control(packer, apply_torque, steer_req):
 
 
 def create_steering_control_angle(packer, apply_angle, lkas_request):
-  # ES_LKAS_ANGLE.LKAS_Output is a signed 17-bit value at 0.01 deg/LSB.
-  # SET_3 is a static value the stock camera sends; required by the EPS to accept the command.
+  # SET_3 mirrors the stock camera; EPS requires it to accept the command.
   values = {
     "LKAS_Output": apply_angle,
     "LKAS_Request": lkas_request,

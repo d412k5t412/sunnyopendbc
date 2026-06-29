@@ -7,6 +7,7 @@ from opendbc.car.subaru import subarucan
 from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
 
 from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
+from opendbc.sunnypilot.car.subaru.lateral_ext import LkasAngleStateMachine
 
 # FIXME: These limits aren't exact. The real limit is more than likely over a larger time period and
 # involves the total steering angle change rather than rate, but these limits work well for now
@@ -20,6 +21,8 @@ class CarController(CarControllerBase, SnGCarController):
     SnGCarController.__init__(self, CP, CP_SP)
     self.apply_torque_last = 0
     self.apply_angle_last = 0.0
+    self.angle_sm = LkasAngleStateMachine()
+    self.es_disengage_frames = 1000
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
@@ -51,12 +54,13 @@ class CarController(CarControllerBase, SnGCarController):
     return msg
 
   def handle_angle_lateral(self, CC, CS):
-    # Single rate/limit pass for LKAS_ANGLE cars. Mirrors safety in opendbc/safety/modes/subaru.h.
-    apply_angle = apply_std_steer_angle_limits(CC.actuators.steeringAngleDeg, self.apply_angle_last,
+    # sunnypilot: override / engage shaping + jerk-limited planner; `active` stays True during the disengage taper.
+    planner_angle, active = self.angle_sm.update(CC, CS)
+    apply_angle = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last,
                                                CS.out.vEgoRaw, CS.out.steeringAngleDeg,
-                                               CC.latActive, self.p.ANGLE_LIMITS)
+                                               active, self.p.ANGLE_LIMITS)
     self.apply_angle_last = apply_angle
-    return subarucan.create_steering_control_angle(self.packer, apply_angle, CC.latActive)
+    return subarucan.create_steering_control_angle(self.packer, apply_angle, active)
 
   def update(self, CC, CC_SP, CS, now_nanos):
     actuators = CC.actuators
@@ -109,11 +113,19 @@ class CarController(CarControllerBase, SnGCarController):
         can_sends.append(subarucan.create_preglobal_es_distance(self.packer, cruise_button, CS.es_distance_msg))
 
     else:
-      if self.CP.flags & SubaruFlags.LKAS_ANGLE:
-        # angle cars: dash reflects lateral activity, not ACC enable
-        lkas_dash_active = CC.latActive and not CS.out.steerFaultPermanent
+      # MADS-only ES hold: keep ES_DashStatus / ES_LKAS_State alive after CC.enabled falls so
+      # EyeSight doesn't fault when the driver releases ACC but keeps MADS lateral.
+      if CC.enabled:
+        self.es_disengage_frames = 0
       else:
-        lkas_dash_active = CC.enabled
+        self.es_disengage_frames = min(self.es_disengage_frames + 1, 1000)
+      es_enabled = self.es_disengage_frames < 50 or (CS.out.brakePressed and self.es_disengage_frames < 500)
+
+      if self.CP.flags & SubaruFlags.LKAS_ANGLE:
+        # dash mirrors lateral activity (incl. taper), ignores transient EPS faults so it doesn't flicker
+        lkas_dash_active = (CC.latActive or self.angle_sm.disengage_taper_remaining > 0) and not CS.out.steerFaultPermanent
+      else:
+        lkas_dash_active = es_enabled
 
       if self.frame % 10 == 0:
         can_sends.append(subarucan.create_es_dashstatus(self.packer, self.frame // 10, CS.es_dashstatus_msg, CC.enabled,
