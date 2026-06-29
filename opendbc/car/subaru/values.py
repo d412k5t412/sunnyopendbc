@@ -11,13 +11,15 @@ Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
-  # LKAS_ANGLE: ES_LKAS_ANGLE 0x124 LKAS_Output is signed 17-bit at 0.01 deg/LSB (range +/-655.36 deg).
-  # We leave headroom below the EPS fault threshold (~650 deg measured). Speed-dependent rate limits
-  # are matched to the safety hooks in opendbc/safety/modes/subaru.h SUBARU_ANGLE_STEERING_LIMITS.
+  # LKAS_ANGLE: ES_LKAS_ANGLE.LKAS_Output is signed 17-bit at 0.01 deg/LSB.
+  # STEER_ANGLE_MAX must exactly match max_angle in subaru.h: inactive heartbeats track clip(measured, max),
+  # and any mismatch past full lock gets them blocked by the panda until the EPS faults on heartbeat loss.
   ANGLE_LIMITS = AngleSteeringLimits(
-    STEER_ANGLE_MAX=600,
-    ANGLE_RATE_LIMIT_UP=([0., 5., 35.], [5., 0.8, 0.15]),
-    ANGLE_RATE_LIMIT_DOWN=([0., 5., 35.], [5., 0.8, 0.15]),
+    STEER_ANGLE_MAX=720,
+    # deg per STEER_STEP (20 ms), ~90% of the panda safety lookup at every point.
+    # DOWN is looser than UP: unwinding out of a curve needs high rates and is self-stabilizing.
+    ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [1.2, 1.0, 0.72, 0.54, 0.18]),
+    ANGLE_RATE_LIMIT_DOWN=([0., 1.5, 5., 15., 35.], [1.7, 1.5, 1.05, 0.80, 0.22]),
   )
 
   def __init__(self, CP):

@@ -214,10 +214,13 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
 
   FLAGS = SubaruSafetyFlags.LKAS_ANGLE | SubaruSafetyFlags.GEN2
 
+  # Safety cap is 720 deg, but LKAS_Output is 17-bit at 0.01 deg/LSB (+/-655.35), so sweeps
+  # are bounded by what CANPacker can encode; keep headroom for the rate-delta probes.
   STEER_ANGLE_MAX = 650
+  STEER_ANGLE_TEST_MAX = 640
   ANGLE_RATE_BP = [0, 5, 35]
-  ANGLE_RATE_UP = [5, 0.8, 0.15]
-  ANGLE_RATE_DOWN = [5, 0.8, 0.15]
+  ANGLE_RATE_UP = [1.5, 0.8, 0.20]
+  ANGLE_RATE_DOWN = [2.0, 1.2, 0.25]
 
   def _angle_cmd_msg(self, angle, enabled=1):
     values = {"LKAS_Output": angle, "LKAS_Request": enabled, "SET_3": 3}
