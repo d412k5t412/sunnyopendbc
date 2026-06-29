@@ -18,7 +18,7 @@ class CarState(CarStateBase, MadsCarState, SnGCarState):
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     self.shifter_values = can_define.dv["Transmission"]["Gear"]
 
-    self.angle_rate_calulator = CanSignalRateCalculator(50)
+    self.angle_rate_calculator = CanSignalRateCalculator(50)
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
@@ -70,15 +70,15 @@ class CarState(CarStateBase, MadsCarState, SnGCarState):
       ret.steeringAngleDeg = cp.vl["Steering_Torque"]["Steering_Angle"]
       steering_updated = len(cp.vl_all["Steering_Torque"]["Steering_Angle"]) > 0
     else:
-      # Steering_Torque->Steering_Angle exists on SUBARU_FORESTER_2022, SUBARU_OUTBACK_2023, SUBARU_ASCENT_2023 where
-      # it is identical to Steering_2's signal. However, it is always zero on newer LKAS_ANGLE cars
-      # such as 2024+ Crosstrek, 2023+ Ascent, etc. Use a universal signal for LKAS_ANGLE cars.
+      # Use Steering_2 universally for LKAS_ANGLE cars: Steering_Torque->Steering_Angle is identical on
+      # SUBARU_FORESTER_2022 / SUBARU_OUTBACK_2023 / SUBARU_ASCENT_2023 but reads zero on newer angle
+      # cars (2024+ Crosstrek, etc.). Steering_2 is present on all of them.
       ret.steeringAngleDeg = cp.vl["Steering_2"]["Steering_Angle"]
       steering_updated = len(cp.vl_all["Steering_2"]["Steering_Angle"]) > 0
 
     if not (self.CP.flags & SubaruFlags.PREGLOBAL):
       # ideally we get this from the car, but unclear if it exists. diagnostic software doesn't even have it
-      ret.steeringRateDeg = self.angle_rate_calulator.update(ret.steeringAngleDeg, steering_updated)
+      ret.steeringRateDeg = self.angle_rate_calculator.update(ret.steeringAngleDeg, steering_updated)
 
     ret.steeringTorque = cp.vl["Steering_Torque"]["Steer_Torque_Sensor"]
     ret.steeringTorqueEps = cp.vl["Steering_Torque"]["Steer_Torque_Output"]

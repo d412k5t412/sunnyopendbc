@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntFlag
 
 from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
+from opendbc.car.lateral import AngleSteeringLimits
 from opendbc.car.structs import CarParams
 from opendbc.car.docs_definitions import CarFootnote, CarHarness, CarDocs, CarParts, Column
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries, p16
@@ -10,6 +11,15 @@ Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
+  # LKAS_ANGLE: ES_LKAS_ANGLE 0x124 LKAS_Output is signed 17-bit at 0.01 deg/LSB (range +/-655.36 deg).
+  # We leave headroom below the EPS fault threshold (~650 deg measured). Speed-dependent rate limits
+  # are matched to the safety hooks in opendbc/safety/modes/subaru.h SUBARU_ANGLE_STEERING_LIMITS.
+  ANGLE_LIMITS = AngleSteeringLimits(
+    STEER_ANGLE_MAX=600,
+    ANGLE_RATE_LIMIT_UP=([0., 5., 35.], [5., 0.8, 0.15]),
+    ANGLE_RATE_LIMIT_DOWN=([0., 5., 35.], [5., 0.8, 0.15]),
+  )
+
   def __init__(self, CP):
     self.STEER_STEP = 2                # how often we update the steer cmd
     self.STEER_DELTA_UP = 50           # torque increase per refresh, 0.8s to max
@@ -56,6 +66,7 @@ class SubaruSafetyFlags(IntFlag):
   GEN2 = 1
   LONG = 2
   PREGLOBAL_REVERSED_DRIVER_TORQUE = 4
+  LKAS_ANGLE = 8
 
 
 class SubaruFlags(IntFlag):
