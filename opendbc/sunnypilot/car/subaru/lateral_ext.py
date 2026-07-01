@@ -23,7 +23,7 @@ DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge
 # Noise filter on the planner target. Heavy below ~10 mph where EPS angle
 # jitter propagates through the planner as low-speed wobble.
 PLANNER_ANGLE_LP_ALPHA_BP = [0., 4.5, 13., 18.]    # m/s
-PLANNER_ANGLE_LP_ALPHA_V  = [0.10, 0.18, 0.55, 0.80]
+PLANNER_ANGLE_LP_ALPHA_V  = [0.05, 0.12, 0.55, 0.80]
 
 
 class AnglePlanner:
@@ -47,6 +47,10 @@ class AnglePlanner:
   ERR_SCALE_BP = [1.5, 15.0]                         # deg wheel
   ERR_SCALE_V  = [1.0, 3.0]
 
+  # Low-speed deadband; suppresses planner chasing residual LPF jitter at standstill.
+  DEADBAND_BP = [1.5, 3.0]                           # m/s
+  DEADBAND_V  = [0.40, 0.0]                          # deg wheel
+
   def __init__(self):
     self.pos = 0.0
     self.vel = 0.0
@@ -58,8 +62,16 @@ class AnglePlanner:
   def update(self, target: float, v_ego: float) -> float:
     max_rate       = float(np.interp(v_ego, self.MAX_RATE_BP,  self.MAX_RATE_V))
     base_max_accel = float(np.interp(v_ego, self.MAX_ACCEL_BP, self.MAX_ACCEL_V))
+    deadband       = float(np.interp(v_ego, self.DEADBAND_BP,  self.DEADBAND_V))
 
     err = float(target) - self.pos
+
+    if abs(err) <= deadband:
+      new_vel = float(np.clip(0.0, self.vel - base_max_accel, self.vel + base_max_accel))
+      self.pos += new_vel
+      self.vel = new_vel
+      return self.pos
+
     accel_scale = float(np.interp(abs(err), self.ERR_SCALE_BP, self.ERR_SCALE_V))
     max_accel = base_max_accel * accel_scale
 
