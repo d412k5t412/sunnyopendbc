@@ -47,9 +47,9 @@ class AnglePlanner:
   ERR_SCALE_BP = [1.5, 15.0]                         # deg wheel
   ERR_SCALE_V  = [1.0, 3.0]
 
-  # Low-speed deadband; suppresses planner chasing residual LPF jitter at standstill.
-  DEADBAND_BP = [1.5, 3.0]                           # m/s
-  DEADBAND_V  = [0.40, 0.0]                          # deg wheel
+  # Speed-graded deadband; catches low-freq model sway through the stop-and-go band.
+  DEADBAND_BP = [0.5, 1.5, 3.0, 6.0, 9.0, 13.0]      # m/s
+  DEADBAND_V  = [3.0, 4.0, 4.0, 3.0, 2.0, 0.0]       # deg wheel
 
   def __init__(self):
     self.pos = 0.0
@@ -72,8 +72,11 @@ class AnglePlanner:
       self.vel = new_vel
       return self.pos
 
-    accel_scale = float(np.interp(abs(err), self.ERR_SCALE_BP, self.ERR_SCALE_V))
+    # Soft-boundary: shrink effective error by deadband so exit ramps up gently.
+    eff_err = err - np.sign(err) * deadband
+    accel_scale = float(np.interp(abs(eff_err), self.ERR_SCALE_BP, self.ERR_SCALE_V))
     max_accel = base_max_accel * accel_scale
+    err = eff_err
 
     # v^2 = 2 a d  ->  brake distance to reach 0 from |vel| at max_accel
     brake_dist = (self.vel * self.vel) / (2.0 * max_accel) if max_accel > 0.0 else 0.0
