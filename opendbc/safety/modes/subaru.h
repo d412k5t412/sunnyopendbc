@@ -43,6 +43,9 @@
 #define MSG_SUBARU_ES_STATIC_1           0x325U
 #define MSG_SUBARU_ES_STATIC_2           0x121U
 
+// Modern Subaru LKAS_ANGLE EPS hard-faults on active requests >= 200 deg at any speed.
+#define SUBARU_LKAS_ANGLE_MAX_ACTIVE     (200 * 100)
+
 #define SUBARU_MAIN_BUS 0U
 #define SUBARU_ALT_BUS  1U
 #define SUBARU_CAM_BUS  2U
@@ -224,6 +227,8 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
     desired_angle = -1 * to_signed(desired_angle, 17);
     bool lkas_request = GET_BIT(msg, 12U);
 
+    // Reject active requests at/above the EPS hard-fault threshold; inactive heartbeats pass through full-lock.
+    violation |= lkas_request && (ABS(desired_angle) >= SUBARU_LKAS_ANGLE_MAX_ACTIVE);
     violation |= steer_angle_cmd_checks(desired_angle, lkas_request, SUBARU_ANGLE_STEERING_LIMITS);
   }
 
