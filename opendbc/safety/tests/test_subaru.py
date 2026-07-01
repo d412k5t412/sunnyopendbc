@@ -215,9 +215,11 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
   FLAGS = SubaruSafetyFlags.LKAS_ANGLE | SubaruSafetyFlags.GEN2
 
   STEER_ANGLE_MAX = 650
+  # Enabled-request loop must stay below the 200° EPS fault threshold enforced in safety.
+  STEER_ANGLE_TEST_MAX = 195
   ANGLE_RATE_BP = [0, 5, 35]
-  ANGLE_RATE_UP = [5, 0.8, 0.15]
-  ANGLE_RATE_DOWN = [5, 0.8, 0.15]
+  ANGLE_RATE_UP = [1.5, 0.6, 0.15]
+  ANGLE_RATE_DOWN = [2.0, 0.8, 0.20]
 
   def _angle_cmd_msg(self, angle, enabled=1):
     values = {"LKAS_Output": angle, "LKAS_Request": enabled, "SET_3": 3}
@@ -236,6 +238,26 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
     # LKAS_ANGLE cars source the engage bit from ES_Brake, not CruiseControl
     values = {"Cruise_Activated": enable}
     return self.packer.make_can_msg_safety("ES_Brake", self.ALT_CAM_BUS, values)
+
+  def test_active_request_at_fault_threshold_rejected(self):
+    # Modern Subaru EPS hard-faults on active LKAS_ANGLE requests >= 200 deg; reject enabled at/above,
+    # allow just below, and allow inactive heartbeats at any angle (must track through full lock).
+    self.safety.set_controls_allowed(True)
+    for speed in (0., 5., 15., 50.):
+      self._reset_speed_measurement(speed)
+      # Prime prev-desired + measurement so rate/close-to-meas checks don't dominate.
+      for target in (199, 200, 210, -199, -200, -210):
+        self._reset_angle_measurement(target)
+        self._set_prev_desired_angle(target)
+        allowed = abs(target) < 200
+        self.assertEqual(allowed, self._tx(self._angle_cmd_msg(target, enabled=True)),
+                         f"active angle={target} @ v={speed}: expected allowed={allowed}")
+      # Inactive heartbeats must pass regardless of angle magnitude (up to CAN capacity).
+      for target in (199, 210, 500, -199, -210, -500):
+        self._reset_angle_measurement(target)
+        self._set_prev_desired_angle(target)
+        self.assertTrue(self._tx(self._angle_cmd_msg(target, enabled=False)),
+                        f"inactive heartbeat angle={target} @ v={speed} should pass")
 
 
 class TestSubaruGen1AngleStockLongitudinalSafety(TestSubaruStockLongitudinalSafetyBase, TestSubaruAngleSafetyBase):
