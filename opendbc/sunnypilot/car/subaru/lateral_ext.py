@@ -12,12 +12,11 @@ bounds both angle rate and angle acceleration on the commanded output.
 import numpy as np
 
 DRIVER_OVERRIDE_TORQUE = 120
-DRIVER_OVERRIDE_TORQUE_RELEASE = 70
+DRIVER_OVERRIDE_TORQUE_RELEASE = 100     # resting-hand torque logs at p90 ~40-90; release must clear it
 SUSPEND_HOLD_FRAMES = 25                 # ~0.5 s
 MADS_ONLY_MAX_STEER_ANGLE = 120          # deg
 
 PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
-REACTIVATION_RAMP_FRAMES = 35            # ~0.7 s
 DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge-falling
 
 # Noise filter on the planner target. Heavy below ~10 mph where EPS angle
@@ -51,18 +50,31 @@ class AnglePlanner:
   DEADBAND_BP = [0.5, 1.5, 3.0, 6.0, 9.0, 13.0]      # m/s
   DEADBAND_V  = [3.0, 4.0, 4.0, 3.0, 2.0, 0.0]       # deg wheel
 
+  # Deadband gate on smoothed *signed* target rate: sway alternates sign (filter ~0), real curves sustain it.
+  TARGET_RATE_LP_ALPHA = 0.05                        # ~0.4 s tau at 50 Hz
+  DEADBAND_RATE_BP = [0.03, 0.09]                    # deg/frame (1.5-4.5 deg/s)
+  DEADBAND_RATE_V  = [1.0, 0.0]
+
   def __init__(self):
     self.pos = 0.0
     self.vel = 0.0
+    self.last_target = 0.0
+    self.target_rate_filt = 0.0
 
   def reset(self, angle: float) -> None:
     self.pos = float(angle)
     self.vel = 0.0
+    self.last_target = float(angle)
+    self.target_rate_filt = 0.0
 
   def update(self, target: float, v_ego: float) -> float:
     max_rate       = float(np.interp(v_ego, self.MAX_RATE_BP,  self.MAX_RATE_V))
     base_max_accel = float(np.interp(v_ego, self.MAX_ACCEL_BP, self.MAX_ACCEL_V))
     deadband       = float(np.interp(v_ego, self.DEADBAND_BP,  self.DEADBAND_V))
+
+    self.target_rate_filt += self.TARGET_RATE_LP_ALPHA * ((float(target) - self.last_target) - self.target_rate_filt)
+    self.last_target = float(target)
+    deadband *= float(np.interp(abs(self.target_rate_filt), self.DEADBAND_RATE_BP, self.DEADBAND_RATE_V))
 
     err = float(target) - self.pos
 
@@ -99,11 +111,9 @@ class LkasAngleStateMachine:
     self.suspended = False
     self.below_release_count = 0
     self.pre_engage_clean_frames = 0
-    self.frames_since_resume = REACTIVATION_RAMP_FRAMES
     self.disengage_taper_remaining = 0
     self.active_last = False
     self.planner_angle_filt = 0.0
-    self.last_out_angle = 0.0
     self.planner = AnglePlanner()
 
   def update(self, CC, CS):
@@ -126,7 +136,6 @@ class LkasAngleStateMachine:
         if self.below_release_count >= SUSPEND_HOLD_FRAMES:
           self.suspended = False
           self.below_release_count = 0
-          self.frames_since_resume = 0
       else:
         self.below_release_count = 0
     else:
@@ -139,9 +148,7 @@ class LkasAngleStateMachine:
       want_active = False
 
     if want_active and not self.active_last:
-      self.frames_since_resume = 0
       self.planner_angle_filt = CS.out.steeringAngleDeg
-      self.last_out_angle = CS.out.steeringAngleDeg
       self.planner.reset(CS.out.steeringAngleDeg)
 
     # Disengage taper keeps LKAS_Request high for a few frames on clean disengage
@@ -154,34 +161,20 @@ class LkasAngleStateMachine:
 
     active = want_active or (self.disengage_taper_remaining > 0 and not self.suspended)
 
-    if want_active and self.frames_since_resume < REACTIVATION_RAMP_FRAMES:
-      self.frames_since_resume += 1
-
     if active:
       # Stage 1: LPF on the planner target (noise reject).
       alpha = np.interp(CS.out.vEgoRaw, PLANNER_ANGLE_LP_ALPHA_BP, PLANNER_ANGLE_LP_ALPHA_V)
-      filtered_target = alpha * CC.actuators.steeringAngleDeg + (1.0 - alpha) * self.planner_angle_filt
-      self.planner_angle_filt = filtered_target
+      self.planner_angle_filt = alpha * CC.actuators.steeringAngleDeg + (1.0 - alpha) * self.planner_angle_filt
 
-      # During taper, steer planner toward live EPS angle for a smooth merge
-      # into the inactive (command = current angle) path.
-      if not want_active and self.disengage_taper_remaining > 0:
-        filtered_target = CS.out.steeringAngleDeg
+      # During taper, chase the live EPS angle for a smooth merge into the inactive path.
+      target = self.planner_angle_filt if want_active else CS.out.steeringAngleDeg
 
-      # Stage 2: jerk-limited trajectory.
-      planner_angle = self.planner.update(filtered_target, CS.out.vEgoRaw)
-
-      if want_active:
-        ramp_w = min(1.0, self.frames_since_resume / REACTIVATION_RAMP_FRAMES)
-      else:
-        ramp_w = self.disengage_taper_remaining / DISENGAGE_TAPER_FRAMES
-
-      out_angle = ramp_w * planner_angle + (1.0 - ramp_w) * self.last_out_angle
+      # Stage 2: jerk-limited trajectory (accel bound also shapes engage pull-in).
+      out_angle = self.planner.update(target, CS.out.vEgoRaw)
     else:
       self.planner_angle_filt = CS.out.steeringAngleDeg
       self.planner.reset(CS.out.steeringAngleDeg)
       out_angle = CS.out.steeringAngleDeg
 
-    self.last_out_angle = out_angle
     self.active_last = active
     return out_angle, active

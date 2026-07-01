@@ -122,8 +122,8 @@ class CarController(CarControllerBase, SnGCarController):
       es_enabled = self.es_disengage_frames < 50 or (CS.out.brakePressed and self.es_disengage_frames < 500)
 
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
-        # dash mirrors lateral activity (incl. taper), ignores transient EPS faults so it doesn't flicker
-        lkas_dash_active = (CC.latActive or self.angle_sm.disengage_taper_remaining > 0) and not CS.out.steerFaultPermanent
+        # dash mirrors actual actuation (state machine output incl. taper, excl. override suspend)
+        lkas_dash_active = self.angle_sm.active_last and not CS.out.steerFaultPermanent
       else:
         lkas_dash_active = es_enabled
 
