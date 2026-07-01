@@ -41,11 +41,11 @@ class AnglePlanner:
   """
 
   MAX_RATE_BP = [0., 1.5, 5., 15., 35.]              # m/s
-  MAX_RATE_V  = [0.70, 0.60, 0.45, 0.28, 0.14]       # deg/frame
+  MAX_RATE_V  = [0.70, 0.60, 0.45, 0.37, 0.14]       # deg/frame
 
   # Tuned so reaching peak rate from rest takes ~0.25-0.30 s at every speed.
   MAX_ACCEL_BP = [0., 5., 15., 35.]                  # m/s
-  MAX_ACCEL_V  = [0.050, 0.035, 0.022, 0.012]        # deg/frame^2
+  MAX_ACCEL_V  = [0.050, 0.035, 0.030, 0.012]        # deg/frame^2
 
   # Scale accel up when error is large (lane changes, recovery) so big
   # maneuvers don't feel sluggish; small corrections keep the smooth profile.

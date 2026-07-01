@@ -17,7 +17,7 @@ class CarControllerParams:
   # lower-jerk than winding in.
   ANGLE_LIMITS = AngleSteeringLimits(
     STEER_ANGLE_MAX=700,
-    ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [0.8, 0.7, 0.5, 0.30, 0.15]),
+    ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [0.8, 0.7, 0.5, 0.40, 0.15]),
     ANGLE_RATE_LIMIT_DOWN=([0., 1.5, 5., 15., 35.], [1.1, 1.0, 0.7, 0.40, 0.20]),
   )
 
