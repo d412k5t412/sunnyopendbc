@@ -15,15 +15,10 @@ DRIVER_OVERRIDE_TORQUE = 120
 DRIVER_OVERRIDE_TORQUE_RELEASE = 70
 SUSPEND_HOLD_FRAMES = 25                 # ~0.5 s
 MADS_ONLY_MAX_STEER_ANGLE = 120          # deg
-OVERRIDE_ANGLE_SIGN_FLOOR = 5.0          # deg; below this, torque direction is unreliable
 
 PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
 REACTIVATION_RAMP_FRAMES = 35            # ~0.7 s
 DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge-falling
-
-# EPS hard-faults on active requests >= 200° at any speed; clamp actives + yield-and-track.
-LKAS_ANGLE_MAX_ACTIVE = 195.0            # deg
-LKAS_ANGLE_YIELD_RELEASE = 185.0         # deg
 
 # Noise filter on the planner target. Heavy below ~10 mph where EPS angle
 # jitter propagates through the planner as low-speed wobble.
@@ -107,7 +102,6 @@ class LkasAngleStateMachine:
     self.planner_angle_filt = 0.0
     self.last_out_angle = 0.0
     self.planner = AnglePlanner()
-    self.angle_yield = False
 
   def update(self, CC, CS):
     """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
@@ -122,11 +116,7 @@ class LkasAngleStateMachine:
       self.pre_engage_clean_frames = 0
     pre_engage_ok = self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
 
-    # Directional override entry: only opposing torque counts; release stays magnitude-only.
-    desired_angle = CC.actuators.steeringAngleDeg
-    opposing = (abs(desired_angle) <= OVERRIDE_ANGLE_SIGN_FLOOR
-                or CS.out.steeringTorque * desired_angle < 0.0)
-
+    # suspend hysteresis on driver override / extreme angle
     if self.suspended:
       if torque < DRIVER_OVERRIDE_TORQUE_RELEASE and not extreme_angle_mads_only:
         self.below_release_count += 1
@@ -137,7 +127,7 @@ class LkasAngleStateMachine:
       else:
         self.below_release_count = 0
     else:
-      if (torque > DRIVER_OVERRIDE_TORQUE and opposing) or extreme_angle_mads_only:
+      if torque > DRIVER_OVERRIDE_TORQUE or extreme_angle_mads_only:
         self.suspended = True
         self.below_release_count = 0
 
@@ -188,22 +178,6 @@ class LkasAngleStateMachine:
       self.planner_angle_filt = CS.out.steeringAngleDeg
       self.planner.reset(CS.out.steeringAngleDeg)
       out_angle = CS.out.steeringAngleDeg
-
-    # 200° EPS fault protection: yield-and-track measured; release when both drop below release.
-    meas_angle = CS.out.steeringAngleDeg
-    if not active:
-      self.angle_yield = False
-    elif not self.angle_yield:
-      if abs(meas_angle) >= LKAS_ANGLE_MAX_ACTIVE:
-        self.angle_yield = True
-    elif max(abs(CC.actuators.steeringAngleDeg), abs(meas_angle)) < LKAS_ANGLE_YIELD_RELEASE:
-      self.angle_yield = False
-
-    if self.angle_yield:
-      out_angle = meas_angle
-      active = False
-    elif active:
-      out_angle = float(np.clip(out_angle, -LKAS_ANGLE_MAX_ACTIVE, LKAS_ANGLE_MAX_ACTIVE))
 
     self.last_out_angle = out_angle
     self.active_last = active
