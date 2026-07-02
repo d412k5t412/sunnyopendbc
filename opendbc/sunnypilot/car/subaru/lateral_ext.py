@@ -26,7 +26,7 @@ DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge
 # Noise filter on the planner target. Heavy below ~10 mph where EPS angle
 # jitter propagates through the planner as low-speed wobble.
 PLANNER_ANGLE_LP_ALPHA_BP = [0., 4.5, 13., 18.]    # m/s
-PLANNER_ANGLE_LP_ALPHA_V  = [0.05, 0.12, 0.55, 0.80]
+PLANNER_ANGLE_LP_ALPHA_V  = [0.10, 0.20, 0.55, 0.80]
 
 
 class AnglePlanner:
@@ -48,11 +48,12 @@ class AnglePlanner:
   # Scale accel up when error is large (lane changes, recovery) so big
   # maneuvers don't feel sluggish; small corrections keep the smooth profile.
   ERR_SCALE_BP = [1.5, 15.0]                         # deg wheel
-  ERR_SCALE_V  = [1.0, 3.0]
+  ERR_SCALE_V  = [1.0, 2.0]
 
-  # Speed-graded deadband; catches low-freq model sway through the stop-and-go band.
+  # Deadband gates *starting* a correction only; once latched, track to completion (no offset, no exit burst).
   DEADBAND_BP = [0.5, 1.5, 3.0, 6.0, 9.0, 13.0]      # m/s
-  DEADBAND_V  = [3.0, 4.0, 4.0, 3.0, 2.0, 0.0]       # deg wheel
+  DEADBAND_V  = [1.5, 2.0, 2.0, 1.5, 1.0, 0.0]       # deg wheel
+  REARM_ERR = 0.3                                    # deg; correction done -> re-arm deadband
 
   # Deadband gate on smoothed *signed* target rate: sway alternates sign (filter ~0), real curves sustain it.
   TARGET_RATE_LP_ALPHA = 0.05                        # ~0.4 s tau at 50 Hz
@@ -64,12 +65,14 @@ class AnglePlanner:
     self.vel = 0.0
     self.last_target = 0.0
     self.target_rate_filt = 0.0
+    self.correcting = False
 
   def reset(self, angle: float) -> None:
     self.pos = float(angle)
     self.vel = 0.0
     self.last_target = float(angle)
     self.target_rate_filt = 0.0
+    self.correcting = False
 
   def update(self, target: float, v_ego: float) -> float:
     max_rate       = float(np.interp(v_ego, self.MAX_RATE_BP,  self.MAX_RATE_V))
@@ -82,17 +85,19 @@ class AnglePlanner:
 
     err = float(target) - self.pos
 
-    if abs(err) <= deadband:
+    # latch: deadband decides when a correction starts; completion is decided by REARM_ERR
+    if not self.correcting and abs(err) > deadband:
+      self.correcting = True
+    if self.correcting and abs(err) < self.REARM_ERR and abs(self.vel) < 2.0 * base_max_accel:
+      self.correcting = False
+
+    if not self.correcting:
       new_vel = float(np.clip(0.0, self.vel - base_max_accel, self.vel + base_max_accel))
       self.pos += new_vel
       self.vel = new_vel
       return self.pos
 
-    # Soft-boundary: shrink effective error by deadband so exit ramps up gently.
-    eff_err = err - np.sign(err) * deadband
-    accel_scale = float(np.interp(abs(eff_err), self.ERR_SCALE_BP, self.ERR_SCALE_V))
-    max_accel = base_max_accel * accel_scale
-    err = eff_err
+    max_accel = base_max_accel * float(np.interp(abs(err), self.ERR_SCALE_BP, self.ERR_SCALE_V))
 
     # v^2 = 2 a d  ->  brake distance to reach 0 from |vel| at max_accel
     brake_dist = (self.vel * self.vel) / (2.0 * max_accel) if max_accel > 0.0 else 0.0
