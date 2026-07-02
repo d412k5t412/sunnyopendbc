@@ -13,7 +13,11 @@ import numpy as np
 
 DRIVER_OVERRIDE_TORQUE = 120
 DRIVER_OVERRIDE_TORQUE_RELEASE = 100     # resting-hand torque logs at p90 ~40-90; release must clear it
+WHEEL_SETTLED_RATE = 25.                 # deg/s; torque dips mid-maneuver, wheel motion doesn't
+RESUME_MAX_TARGET_ERR = 20.              # deg; don't take over while plan and hand-held angle disagree
 SUSPEND_HOLD_FRAMES = 25                 # ~0.5 s
+RESUME_CHURN_MAX_LEVEL = 3               # hold doubles per churn level: 0.5 -> 1 -> 2 -> 4 s
+CHURN_DECAY_FRAMES = 750                 # ~15 s without override forgives one churn level
 MADS_ONLY_MAX_STEER_ANGLE = 120          # deg
 
 PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
@@ -114,6 +118,8 @@ class LkasAngleStateMachine:
     self.disengage_taper_remaining = 0
     self.active_last = False
     self.planner_angle_filt = 0.0
+    self.churn_level = 0
+    self.frames_since_suspend = CHURN_DECAY_FRAMES * (RESUME_CHURN_MAX_LEVEL + 1)
     self.planner = AnglePlanner()
 
   def update(self, CC, CS):
@@ -122,26 +128,37 @@ class LkasAngleStateMachine:
     extreme_angle = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE
     extreme_angle_mads_only = extreme_angle and not CC.enabled
 
+    # handoff is clear only when torque, wheel motion, and plan-vs-hand disagreement are all low
+    handoff_clear = (torque < DRIVER_OVERRIDE_TORQUE_RELEASE
+                     and abs(CS.out.steeringRateDeg) < WHEEL_SETTLED_RATE
+                     and abs(CC.actuators.steeringAngleDeg - CS.out.steeringAngleDeg) < RESUME_MAX_TARGET_ERR
+                     and not extreme_angle_mads_only)
+
     # pre-engage clean-frame gate
-    if torque < DRIVER_OVERRIDE_TORQUE_RELEASE and not extreme_angle_mads_only:
+    if handoff_clear:
       self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, PRE_ENGAGE_CLEAN_FRAMES)
     else:
       self.pre_engage_clean_frames = 0
     pre_engage_ok = self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
 
-    # suspend hysteresis on driver override / extreme angle
+    self.frames_since_suspend = min(self.frames_since_suspend + 1, CHURN_DECAY_FRAMES * (RESUME_CHURN_MAX_LEVEL + 1))
+
+    # suspend hysteresis on driver override / extreme angle; hold doubles per churn level, decays ~15 s/level
     if self.suspended:
-      if torque < DRIVER_OVERRIDE_TORQUE_RELEASE and not extreme_angle_mads_only:
+      if handoff_clear:
         self.below_release_count += 1
-        if self.below_release_count >= SUSPEND_HOLD_FRAMES:
+        if self.below_release_count >= SUSPEND_HOLD_FRAMES << self.churn_level:
           self.suspended = False
           self.below_release_count = 0
       else:
         self.below_release_count = 0
     else:
       if torque > DRIVER_OVERRIDE_TORQUE or extreme_angle_mads_only:
+        decayed = max(0, self.churn_level - self.frames_since_suspend // CHURN_DECAY_FRAMES)
+        self.churn_level = min(decayed + 1, RESUME_CHURN_MAX_LEVEL)
         self.suspended = True
         self.below_release_count = 0
+        self.frames_since_suspend = 0
 
     want_active = CC.latActive and not self.suspended
     if want_active and not self.active_last and not pre_engage_ok:
