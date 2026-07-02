@@ -56,8 +56,8 @@ class AnglePlanner:
   REARM_ERR = 0.3                                    # deg; correction done -> re-arm deadband
 
   # Deadband gate on smoothed *signed* target rate: sway alternates sign (filter ~0), real curves sustain it.
-  TARGET_RATE_LP_ALPHA = 0.05                        # ~0.4 s tau at 50 Hz
-  DEADBAND_RATE_BP = [0.03, 0.09]                    # deg/frame (1.5-4.5 deg/s)
+  TARGET_RATE_LP_ALPHA = 0.10                        # ~0.2 s tau at 50 Hz
+  DEADBAND_RATE_BP = [0.02, 0.06]                    # deg/frame (1-3 deg/s)
   DEADBAND_RATE_V  = [1.0, 0.0]
 
   def __init__(self):
