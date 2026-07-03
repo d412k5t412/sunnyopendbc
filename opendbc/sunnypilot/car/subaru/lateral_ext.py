@@ -39,7 +39,7 @@ class AnglePlanner:
   """
 
   MAX_RATE_BP = [0., 1.5, 5., 15., 35.]              # m/s
-  MAX_RATE_V  = [0.70, 0.60, 0.45, 0.37, 0.14]       # deg/frame
+  MAX_RATE_V  = [0.80, 0.70, 0.50, 0.40, 0.15]       # deg/frame; matches ANGLE_RATE_LIMIT_UP — planner must not out-restrict the envelope
 
   # Tuned so reaching peak rate from rest takes ~0.25-0.30 s at every speed.
   MAX_ACCEL_BP = [0., 5., 15., 35.]                  # m/s
@@ -48,7 +48,7 @@ class AnglePlanner:
   # Scale accel up when error is large (lane changes, recovery) so big
   # maneuvers don't feel sluggish; small corrections keep the smooth profile.
   ERR_SCALE_BP = [1.5, 15.0]                         # deg wheel
-  ERR_SCALE_V  = [1.0, 2.0]
+  ERR_SCALE_V  = [1.0, 3.0]                          # latch killed the deadband-exit burst, so full catch-up authority is safe again
 
   # Deadband gates *starting* a correction only; once latched, track to completion (no offset, no exit burst).
   DEADBAND_BP = [0.5, 1.5, 3.0, 6.0, 9.0, 13.0]      # m/s
