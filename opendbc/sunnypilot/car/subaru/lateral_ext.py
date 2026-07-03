@@ -16,8 +16,6 @@ DRIVER_OVERRIDE_TORQUE_RELEASE = 100     # resting-hand torque logs at p90 ~40-9
 WHEEL_SETTLED_RATE = 25.                 # deg/s; torque dips mid-maneuver, wheel motion doesn't
 RESUME_MAX_TARGET_ERR = 20.              # deg; don't take over while plan and hand-held angle disagree
 SUSPEND_HOLD_FRAMES = 25                 # ~0.5 s
-RESUME_CHURN_MAX_LEVEL = 3               # hold doubles per churn level: 0.5 -> 1 -> 2 -> 4 s
-CHURN_DECAY_FRAMES = 750                 # ~15 s without override forgives one churn level
 MADS_ONLY_MAX_STEER_ANGLE = 120          # deg
 
 PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
@@ -48,55 +46,21 @@ class AnglePlanner:
   # Scale accel up when error is large (lane changes, recovery) so big
   # maneuvers don't feel sluggish; small corrections keep the smooth profile.
   ERR_SCALE_BP = [1.5, 15.0]                         # deg wheel
-  ERR_SCALE_V  = [1.0, 3.0]                          # latch killed the deadband-exit burst, so full catch-up authority is safe again
-
-  # Deadband gates *starting* a correction only; once latched, track to completion (no offset, no exit burst).
-  DEADBAND_BP = [0.5, 1.5, 3.0, 6.0, 9.0, 13.0]      # m/s
-  DEADBAND_V  = [1.5, 2.0, 2.0, 1.5, 1.0, 0.0]       # deg wheel
-  REARM_ERR = 0.3                                    # deg; correction done -> re-arm deadband
-
-  # Deadband gate on smoothed *signed* target rate: sway alternates sign (filter ~0), real curves sustain it.
-  TARGET_RATE_LP_ALPHA = 0.10                        # ~0.2 s tau at 50 Hz
-  DEADBAND_RATE_BP = [0.02, 0.06]                    # deg/frame (1-3 deg/s)
-  DEADBAND_RATE_V  = [1.0, 0.0]
+  ERR_SCALE_V  = [1.0, 3.0]
 
   def __init__(self):
     self.pos = 0.0
     self.vel = 0.0
-    self.last_target = 0.0
-    self.target_rate_filt = 0.0
-    self.correcting = False
 
   def reset(self, angle: float) -> None:
     self.pos = float(angle)
     self.vel = 0.0
-    self.last_target = float(angle)
-    self.target_rate_filt = 0.0
-    self.correcting = False
 
   def update(self, target: float, v_ego: float) -> float:
     max_rate       = float(np.interp(v_ego, self.MAX_RATE_BP,  self.MAX_RATE_V))
     base_max_accel = float(np.interp(v_ego, self.MAX_ACCEL_BP, self.MAX_ACCEL_V))
-    deadband       = float(np.interp(v_ego, self.DEADBAND_BP,  self.DEADBAND_V))
-
-    self.target_rate_filt += self.TARGET_RATE_LP_ALPHA * ((float(target) - self.last_target) - self.target_rate_filt)
-    self.last_target = float(target)
-    deadband *= float(np.interp(abs(self.target_rate_filt), self.DEADBAND_RATE_BP, self.DEADBAND_RATE_V))
 
     err = float(target) - self.pos
-
-    # latch: deadband decides when a correction starts; completion is decided by REARM_ERR
-    if not self.correcting and abs(err) > deadband:
-      self.correcting = True
-    if self.correcting and abs(err) < self.REARM_ERR and abs(self.vel) < 2.0 * base_max_accel:
-      self.correcting = False
-
-    if not self.correcting:
-      new_vel = float(np.clip(0.0, self.vel - base_max_accel, self.vel + base_max_accel))
-      self.pos += new_vel
-      self.vel = new_vel
-      return self.pos
-
     max_accel = base_max_accel * float(np.interp(abs(err), self.ERR_SCALE_BP, self.ERR_SCALE_V))
 
     # v^2 = 2 a d  ->  brake distance to reach 0 from |vel| at max_accel
@@ -123,8 +87,6 @@ class LkasAngleStateMachine:
     self.disengage_taper_remaining = 0
     self.active_last = False
     self.planner_angle_filt = 0.0
-    self.churn_level = 0
-    self.frames_since_suspend = CHURN_DECAY_FRAMES * (RESUME_CHURN_MAX_LEVEL + 1)
     self.planner = AnglePlanner()
 
   def update(self, CC, CS):
@@ -146,24 +108,19 @@ class LkasAngleStateMachine:
       self.pre_engage_clean_frames = 0
     pre_engage_ok = self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
 
-    self.frames_since_suspend = min(self.frames_since_suspend + 1, CHURN_DECAY_FRAMES * (RESUME_CHURN_MAX_LEVEL + 1))
-
-    # suspend hysteresis on driver override / extreme angle; hold doubles per churn level, decays ~15 s/level
+    # suspend hysteresis on driver override / extreme angle
     if self.suspended:
       if handoff_clear:
         self.below_release_count += 1
-        if self.below_release_count >= SUSPEND_HOLD_FRAMES << self.churn_level:
+        if self.below_release_count >= SUSPEND_HOLD_FRAMES:
           self.suspended = False
           self.below_release_count = 0
       else:
         self.below_release_count = 0
     else:
       if torque > DRIVER_OVERRIDE_TORQUE or extreme_angle_mads_only:
-        decayed = max(0, self.churn_level - self.frames_since_suspend // CHURN_DECAY_FRAMES)
-        self.churn_level = min(decayed + 1, RESUME_CHURN_MAX_LEVEL)
         self.suspended = True
         self.below_release_count = 0
-        self.frames_since_suspend = 0
 
     want_active = CC.latActive and not self.suspended
     if want_active and not self.active_last and not pre_engage_ok:
