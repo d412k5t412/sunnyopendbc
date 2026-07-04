@@ -13,12 +13,10 @@ Ecu = CarParams.Ecu
 class CarControllerParams:
   # LKAS_ANGLE: ES_LKAS_ANGLE.LKAS_Output is signed 17-bit at 0.01 deg/LSB.
   # STEER_ANGLE_MAX = 700 deg tracks Subaru full-lock; safety cap in subaru.h is 720 deg.
-  # Rates are deg per STEER_STEP (20 ms). DOWN ~30% looser than UP — unwinding is naturally
-  # lower-jerk than winding in.
   ANGLE_LIMITS = AngleSteeringLimits(
     STEER_ANGLE_MAX=700,
-    # ~90% of the panda safety lookup at every breakpoint and midpoint (verified) — curve exit
-    # needs the loose DOWN rates (12:03 runoff log; model demanded ~90 deg/s of unwind).
+    # deg per STEER_STEP (20 ms), ~90% of the panda safety lookup at every point.
+    # DOWN is looser than UP: unwinding out of a curve needs high rates and is self-stabilizing.
     ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [1.2, 1.0, 0.72, 0.54, 0.18]),
     ANGLE_RATE_LIMIT_DOWN=([0., 1.5, 5., 15., 35.], [1.7, 1.5, 1.05, 0.80, 0.22]),
   )

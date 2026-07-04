@@ -190,7 +190,7 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
     },
     .angle_rate_down_lookup = {
       {0., 5., 35.},
-      {2.0, 1.2, 0.25},      // unwind is self-stabilizing; curve-exit demand hits ~90 deg/s (12:03 runoff log)
+      {2.0, 1.2, 0.25},      // looser than UP: unwinding toward center is self-stabilizing and curve exits need high rates
     },
   };
 

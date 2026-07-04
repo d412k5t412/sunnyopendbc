@@ -15,7 +15,7 @@ import numpy as np
 from opendbc.car.vehicle_model import VehicleModel
 
 DRIVER_OVERRIDE_TORQUE = 120
-DRIVER_OVERRIDE_TORQUE_RELEASE = 100     # resting-hand torque logs at p90 ~40-90; release must clear it
+DRIVER_OVERRIDE_TORQUE_RELEASE = 100     # must clear resting-hand torque so light grip doesn't block resume
 WHEEL_SETTLED_RATE = 25.                 # deg/s; torque dips mid-maneuver, wheel motion doesn't
 RESUME_MAX_TARGET_ERR = 20.              # deg; don't take over while plan and hand-held angle disagree
 SUSPEND_HOLD_FRAMES = 25                 # ~0.5 s
@@ -24,9 +24,8 @@ MADS_ONLY_MAX_STEER_ANGLE = 120          # deg
 PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
 DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge-falling
 
-# Roll compensation in actuators.steeringAngleDeg diverges as v -> 0 while the roll estimate wobbles
-# under braking; on crowned roads it cranks the wheel at stops. Fade to a roll-free target (rebuilt
-# from actuators.curvature) approaching a stop, where there is no lateral drift to compensate.
+# Roll compensation in actuators.steeringAngleDeg diverges as v -> 0 and cranks the wheel at stops on
+# crowned roads; fade to a roll-free target rebuilt from actuators.curvature when approaching a stop.
 ROLL_COMP_FADE_BP = [2.0, 8.0]           # m/s
 ROLL_COMP_FADE_V  = [0.0, 1.0]
 
@@ -37,16 +36,10 @@ PLANNER_ANGLE_LP_ALPHA_V  = [0.10, 0.20, 0.55, 0.80]
 
 
 class AnglePlanner:
-  """Jerk-limited trapezoidal motion planner for the LKAS_ANGLE command.
+  """Jerk-limited motion planner for the LKAS_ANGLE command: bounds rate and
+  acceleration so corrections build and release smoothly instead of stepping."""
 
-  Bounds peak rate (deg/frame) and peak acceleration (deg/frame^2). The accel
-  bound is what removes the "jerky" feel — without it, an LPF + rate-limit
-  pipeline turns step targets into sharp velocity corners. Peak rate stays
-  at or below ANGLE_RATE_LIMIT_UP so the safety envelope is unchanged.
-  """
-
-  # Asymmetric, matching ANGLE_RATE_LIMIT_UP/DOWN — the planner must not out-restrict the envelope.
-  # DOWN (unwinding toward center) is much looser; a symmetric planner caused the 12:03 curve-exit runoff.
+  # Asymmetric, mirroring ANGLE_RATE_LIMIT_UP/DOWN so the planner never out-restricts the envelope.
   MAX_RATE_BP     = [0., 1.5, 5., 15., 35.]          # m/s
   MAX_RATE_UP_V   = [1.2, 1.0, 0.72, 0.54, 0.18]     # deg/frame
   MAX_RATE_DOWN_V = [1.7, 1.5, 1.05, 0.80, 0.22]     # deg/frame
@@ -55,8 +48,7 @@ class AnglePlanner:
   MAX_ACCEL_BP = [0., 5., 15., 35.]                  # m/s
   MAX_ACCEL_V  = [0.050, 0.035, 0.030, 0.012]        # deg/frame^2
 
-  # Scale accel up when error is large (lane changes, recovery) so big
-  # maneuvers don't feel sluggish; small corrections keep the smooth profile.
+  # Scale accel up with error so big maneuvers (lane changes, recovery) don't feel sluggish.
   ERR_SCALE_BP = [1.5, 15.0]                         # deg wheel
   ERR_SCALE_V  = [1.0, 3.0]
 
@@ -155,9 +147,8 @@ class LkasAngleStateMachine:
       self.planner_angle_filt = CS.out.steeringAngleDeg
       self.planner.reset(CS.out.steeringAngleDeg)
 
-    # Disengage taper keeps LKAS_Request high for a few frames on clean disengage
-    # so the EyeSight watchdog doesn't see a request edge. Bypassed when suspended
-    # so the panda's command-vs-measured check can't accumulate dropped frames.
+    # Taper holds LKAS_Request high briefly on clean disengage so the EyeSight watchdog doesn't
+    # see a request edge; bypassed when suspended so command-vs-measured frames can't get dropped.
     if want_active:
       self.disengage_taper_remaining = DISENGAGE_TAPER_FRAMES
     elif self.disengage_taper_remaining > 0:
