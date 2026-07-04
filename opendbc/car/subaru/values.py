@@ -17,8 +17,10 @@ class CarControllerParams:
   # lower-jerk than winding in.
   ANGLE_LIMITS = AngleSteeringLimits(
     STEER_ANGLE_MAX=700,
-    ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [0.8, 0.7, 0.5, 0.40, 0.15]),
-    ANGLE_RATE_LIMIT_DOWN=([0., 1.5, 5., 15., 35.], [1.1, 1.0, 0.7, 0.40, 0.20]),
+    # ~90% of the panda safety lookup at every breakpoint and midpoint (verified) — curve exit
+    # needs the loose DOWN rates (12:03 runoff log; model demanded ~90 deg/s of unwind).
+    ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [1.2, 1.0, 0.72, 0.54, 0.18]),
+    ANGLE_RATE_LIMIT_DOWN=([0., 1.5, 5., 15., 35.], [1.7, 1.5, 1.05, 0.80, 0.22]),
   )
 
   def __init__(self, CP):

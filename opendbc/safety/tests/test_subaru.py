@@ -218,8 +218,8 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
   # Enabled-request loop must stay below the 200° EPS fault threshold enforced in safety.
   STEER_ANGLE_TEST_MAX = 195
   ANGLE_RATE_BP = [0, 5, 35]
-  ANGLE_RATE_UP = [1.5, 0.6, 0.15]
-  ANGLE_RATE_DOWN = [2.0, 0.8, 0.20]
+  ANGLE_RATE_UP = [1.5, 0.8, 0.20]
+  ANGLE_RATE_DOWN = [2.0, 1.2, 0.25]
 
   def _angle_cmd_msg(self, angle, enabled=1):
     values = {"LKAS_Output": angle, "LKAS_Request": enabled, "SET_3": 3}

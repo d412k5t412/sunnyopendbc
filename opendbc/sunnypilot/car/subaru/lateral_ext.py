@@ -36,8 +36,11 @@ class AnglePlanner:
   at or below ANGLE_RATE_LIMIT_UP so the safety envelope is unchanged.
   """
 
-  MAX_RATE_BP = [0., 1.5, 5., 15., 35.]              # m/s
-  MAX_RATE_V  = [0.80, 0.70, 0.50, 0.40, 0.15]       # deg/frame; matches ANGLE_RATE_LIMIT_UP — planner must not out-restrict the envelope
+  # Asymmetric, matching ANGLE_RATE_LIMIT_UP/DOWN — the planner must not out-restrict the envelope.
+  # DOWN (unwinding toward center) is much looser; a symmetric planner caused the 12:03 curve-exit runoff.
+  MAX_RATE_BP     = [0., 1.5, 5., 15., 35.]          # m/s
+  MAX_RATE_UP_V   = [1.2, 1.0, 0.72, 0.54, 0.18]     # deg/frame
+  MAX_RATE_DOWN_V = [1.7, 1.5, 1.05, 0.80, 0.22]     # deg/frame
 
   # Tuned so reaching peak rate from rest takes ~0.25-0.30 s at every speed.
   MAX_ACCEL_BP = [0., 5., 15., 35.]                  # m/s
@@ -57,10 +60,13 @@ class AnglePlanner:
     self.vel = 0.0
 
   def update(self, target: float, v_ego: float) -> float:
-    max_rate       = float(np.interp(v_ego, self.MAX_RATE_BP,  self.MAX_RATE_V))
-    base_max_accel = float(np.interp(v_ego, self.MAX_ACCEL_BP, self.MAX_ACCEL_V))
-
     err = float(target) - self.pos
+
+    # moving away from center uses UP limits, unwinding toward center uses the looser DOWN limits
+    winding_up = self.pos * np.sign(err) >= 0.
+    rate_v = self.MAX_RATE_UP_V if winding_up else self.MAX_RATE_DOWN_V
+    max_rate       = float(np.interp(v_ego, self.MAX_RATE_BP,  rate_v))
+    base_max_accel = float(np.interp(v_ego, self.MAX_ACCEL_BP, self.MAX_ACCEL_V))
     max_accel = base_max_accel * float(np.interp(abs(err), self.ERR_SCALE_BP, self.ERR_SCALE_V))
 
     # v^2 = 2 a d  ->  brake distance to reach 0 from |vel| at max_accel

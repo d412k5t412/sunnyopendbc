@@ -186,11 +186,11 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
     .angle_deg_to_can = 100.,
     .angle_rate_up_lookup = {
       {0., 5., 35.},
-      {1.5, 0.6, 0.15},
+      {1.5, 0.8, 0.20},
     },
     .angle_rate_down_lookup = {
       {0., 5., 35.},
-      {2.0, 0.8, 0.20},      // ~30% looser than UP
+      {2.0, 1.2, 0.25},      // unwind is self-stabilizing; curve-exit demand hits ~90 deg/s (12:03 runoff log)
     },
   };
 
