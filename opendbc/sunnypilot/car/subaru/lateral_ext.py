@@ -9,7 +9,10 @@ guards, engage/disengage shaping, and a jerk-limited motion planner that
 bounds both angle rate and angle acceleration on the commanded output.
 """
 
+import math
 import numpy as np
+
+from opendbc.car.vehicle_model import VehicleModel
 
 DRIVER_OVERRIDE_TORQUE = 120
 DRIVER_OVERRIDE_TORQUE_RELEASE = 100     # resting-hand torque logs at p90 ~40-90; release must clear it
@@ -20,6 +23,12 @@ MADS_ONLY_MAX_STEER_ANGLE = 120          # deg
 
 PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
 DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge-falling
+
+# Roll compensation in actuators.steeringAngleDeg diverges as v -> 0 while the roll estimate wobbles
+# under braking; on crowned roads it cranks the wheel at stops. Fade to a roll-free target (rebuilt
+# from actuators.curvature) approaching a stop, where there is no lateral drift to compensate.
+ROLL_COMP_FADE_BP = [2.0, 8.0]           # m/s
+ROLL_COMP_FADE_V  = [0.0, 1.0]
 
 # Noise filter on the planner target. Heavy below ~10 mph where EPS angle
 # jitter propagates through the planner as low-speed wobble.
@@ -86,7 +95,8 @@ class AnglePlanner:
 
 
 class LkasAngleStateMachine:
-  def __init__(self):
+  def __init__(self, CP):
+    self.VM = VehicleModel(CP)
     self.suspended = False
     self.below_release_count = 0
     self.pre_engage_clean_frames = 0
@@ -95,16 +105,25 @@ class LkasAngleStateMachine:
     self.planner_angle_filt = 0.0
     self.planner = AnglePlanner()
 
+  def _target_angle(self, CC, CS) -> float:
+    """actuators.steeringAngleDeg with roll compensation faded out approaching a stop."""
+    w = float(np.interp(CS.out.vEgoRaw, ROLL_COMP_FADE_BP, ROLL_COMP_FADE_V))
+    if w >= 1.0:
+      return CC.actuators.steeringAngleDeg
+    angle_no_roll = math.degrees(self.VM.get_steer_from_curvature(-CC.actuators.curvature, CS.out.vEgoRaw, 0.0))
+    return w * CC.actuators.steeringAngleDeg + (1.0 - w) * angle_no_roll
+
   def update(self, CC, CS):
     """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
     torque = abs(CS.out.steeringTorque)
     extreme_angle = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE
     extreme_angle_mads_only = extreme_angle and not CC.enabled
+    target_angle = self._target_angle(CC, CS)
 
     # handoff is clear only when torque, wheel motion, and plan-vs-hand disagreement are all low
     handoff_clear = (torque < DRIVER_OVERRIDE_TORQUE_RELEASE
                      and abs(CS.out.steeringRateDeg) < WHEEL_SETTLED_RATE
-                     and abs(CC.actuators.steeringAngleDeg - CS.out.steeringAngleDeg) < RESUME_MAX_TARGET_ERR
+                     and abs(target_angle - CS.out.steeringAngleDeg) < RESUME_MAX_TARGET_ERR
                      and not extreme_angle_mads_only)
 
     # pre-engage clean-frame gate
@@ -149,7 +168,7 @@ class LkasAngleStateMachine:
     if active:
       # Stage 1: LPF on the planner target (noise reject).
       alpha = np.interp(CS.out.vEgoRaw, PLANNER_ANGLE_LP_ALPHA_BP, PLANNER_ANGLE_LP_ALPHA_V)
-      self.planner_angle_filt = alpha * CC.actuators.steeringAngleDeg + (1.0 - alpha) * self.planner_angle_filt
+      self.planner_angle_filt = alpha * target_angle + (1.0 - alpha) * self.planner_angle_filt
 
       # During taper, chase the live EPS angle for a smooth merge into the inactive path.
       target = self.planner_angle_filt if want_active else CS.out.steeringAngleDeg

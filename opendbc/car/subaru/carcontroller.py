@@ -21,7 +21,7 @@ class CarController(CarControllerBase, SnGCarController):
     SnGCarController.__init__(self, CP, CP_SP)
     self.apply_torque_last = 0
     self.apply_angle_last = 0.0
-    self.angle_sm = LkasAngleStateMachine()
+    self.angle_sm = LkasAngleStateMachine(CP)
     self.es_disengage_frames = 1000
 
     self.cruise_button_prev = 0
