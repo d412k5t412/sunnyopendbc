@@ -31,8 +31,8 @@ ROLL_COMP_FADE_V  = [0.0, 1.0]
 
 # Noise filter on the planner target. Heavy below ~10 mph where EPS angle
 # jitter propagates through the planner as low-speed wobble.
-PLANNER_ANGLE_LP_ALPHA_BP = [0., 4.5, 13., 18.]    # m/s
-PLANNER_ANGLE_LP_ALPHA_V  = [0.10, 0.20, 0.55, 0.80]
+PLANNER_ANGLE_LP_ALPHA_BP = [0., 4.5, 13., 18., 30.]    # m/s
+PLANNER_ANGLE_LP_ALPHA_V  = [0.10, 0.16, 0.28, 0.33, 0.30]
 
 
 class AnglePlanner:
