@@ -94,6 +94,7 @@ class LkasAngleStateMachine:
     self.pre_engage_clean_frames = 0
     self.disengage_taper_remaining = 0
     self.active_last = False
+    self.enabled_last = False
     self.planner_angle_filt = 0.0
     self.planner = AnglePlanner()
 
@@ -124,6 +125,13 @@ class LkasAngleStateMachine:
     else:
       self.pre_engage_clean_frames = 0
     pre_engage_ok = self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
+
+    # Stock lane centering only runs with ACC: the EPS hard-faults if LKAS_Request rides through an
+    # ACC-engaged -> off transition, so drop the request at the edge and re-engage via the gates.
+    if self.enabled_last and not CC.enabled:
+      self.suspended = True
+      self.below_release_count = 0
+    self.enabled_last = CC.enabled
 
     # suspend hysteresis on driver override / extreme angle
     if self.suspended:
