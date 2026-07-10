@@ -12,9 +12,10 @@ Ecu = CarParams.Ecu
 
 class CarControllerParams:
   # LKAS_ANGLE: ES_LKAS_ANGLE.LKAS_Output is signed 17-bit at 0.01 deg/LSB.
-  # STEER_ANGLE_MAX = 700 deg tracks Subaru full-lock; safety cap in subaru.h is 720 deg.
+  # STEER_ANGLE_MAX must exactly match max_angle in subaru.h: inactive heartbeats track clip(measured, max),
+  # and any mismatch past full lock gets them blocked by the panda until the EPS faults on heartbeat loss.
   ANGLE_LIMITS = AngleSteeringLimits(
-    STEER_ANGLE_MAX=700,
+    STEER_ANGLE_MAX=720,
     # deg per STEER_STEP (20 ms), ~90% of the panda safety lookup at every point.
     # DOWN is looser than UP: unwinding out of a curve needs high rates and is self-stabilizing.
     ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [1.2, 1.0, 0.72, 0.54, 0.18]),
