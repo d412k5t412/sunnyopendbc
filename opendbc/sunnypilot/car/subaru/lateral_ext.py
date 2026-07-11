@@ -29,24 +29,25 @@ DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge
 ROLL_COMP_FADE_BP = [2.0, 8.0]           # m/s
 ROLL_COMP_FADE_V  = [0.0, 1.0]
 
-# Noise filter on the planner target. Heavy below ~10 mph where EPS angle
-# jitter propagates through the planner as low-speed wobble.
+# Noise filter on the planner target. Heavy below ~10 mph where the model target flails
+# (its v^2 curvature limits go vacuous at creep speed) and EPS jitter propagates as wobble.
 PLANNER_ANGLE_LP_ALPHA_BP = [0., 4.5, 13., 18., 30.]    # m/s
-PLANNER_ANGLE_LP_ALPHA_V  = [0.10, 0.16, 0.28, 0.33, 0.30]
+PLANNER_ANGLE_LP_ALPHA_V  = [0.06, 0.13, 0.28, 0.33, 0.30]
 
 
 class AnglePlanner:
   """Jerk-limited motion planner for the LKAS_ANGLE command: bounds rate and
   acceleration so corrections build and release smoothly instead of stepping."""
 
-  # Asymmetric, mirroring ANGLE_RATE_LIMIT_UP/DOWN so the planner never out-restricts the envelope.
-  MAX_RATE_BP     = [0., 1.5, 5., 15., 35.]          # m/s
-  MAX_RATE_UP_V   = [1.2, 1.0, 0.72, 0.54, 0.18]     # deg/frame
-  MAX_RATE_DOWN_V = [1.7, 1.5, 1.05, 0.80, 0.22]     # deg/frame
+  # Asymmetric like ANGLE_RATE_LIMIT_UP/DOWN. Below 4.5 m/s authority is deliberately reduced —
+  # the model target flails at creep speed and full envelope rates saw the wheel at parking pace.
+  MAX_RATE_BP     = [0., 0.9, 2.2, 3.1, 4.5, 15., 35.]              # m/s
+  MAX_RATE_UP_V   = [0.35, 0.35, 0.45, 0.55, 0.72, 0.54, 0.18]      # deg/frame
+  MAX_RATE_DOWN_V = [0.45, 0.45, 0.60, 0.75, 1.05, 0.80, 0.22]      # deg/frame
 
-  # Tuned so reaching peak rate from rest takes ~0.25-0.30 s at every speed.
-  MAX_ACCEL_BP = [0., 5., 15., 35.]                  # m/s
-  MAX_ACCEL_V  = [0.050, 0.035, 0.030, 0.012]        # deg/frame^2
+  # Tuned so reaching peak rate from rest takes ~0.25-0.30 s at every speed; gentler below 7 mph.
+  MAX_ACCEL_BP = [0., 3.1, 5., 15., 35.]             # m/s
+  MAX_ACCEL_V  = [0.025, 0.032, 0.035, 0.030, 0.012] # deg/frame^2
 
   # Scale accel up with error so big maneuvers (lane changes, recovery) don't feel sluggish.
   ERR_SCALE_BP = [1.5, 15.0]                         # deg wheel
