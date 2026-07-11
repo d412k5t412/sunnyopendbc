@@ -113,19 +113,16 @@ class CarController(CarControllerBase, SnGCarController):
         can_sends.append(subarucan.create_preglobal_es_distance(self.packer, cruise_button, CS.es_distance_msg))
 
     else:
-      # MADS-only ES hold: keep ES_DashStatus / ES_LKAS_State alive after CC.enabled falls so
-      # EyeSight doesn't fault when the driver releases ACC but keeps MADS lateral.
-      if CC.enabled:
-        self.es_disengage_frames = 0
-      else:
-        self.es_disengage_frames = min(self.es_disengage_frames + 1, 1000)
-      es_enabled = self.es_disengage_frames < 50 or (CS.out.brakePressed and self.es_disengage_frames < 500)
-
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
         # dash mirrors actual actuation (state machine output incl. taper, excl. override suspend)
         lkas_dash_active = self.angle_sm.active_last and not CS.out.steerFaultPermanent
       else:
-        lkas_dash_active = es_enabled
+        # torque cars: hold the LKAS dash bit briefly after ACC disengage so MADS-only doesn't flicker it
+        if CC.enabled:
+          self.es_disengage_frames = 0
+        else:
+          self.es_disengage_frames = min(self.es_disengage_frames + 1, 1000)
+        lkas_dash_active = self.es_disengage_frames < 50 or (CS.out.brakePressed and self.es_disengage_frames < 500)
 
       if self.frame % 10 == 0:
         can_sends.append(subarucan.create_es_dashstatus(self.packer, self.frame // 10, CS.es_dashstatus_msg, CC.enabled,
