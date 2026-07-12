@@ -132,13 +132,18 @@ class LkasAngleStateMachine:
     else:
       self.lkas_button_settled = min(self.lkas_button_settled + 1, CAMERA_SETTLE_FRAMES)
 
+    # The EPS validates EyeSight's LKAS state at the request rising edge: every logged fault engaged
+    # with the camera state at 0, every clean engagement at 1-3. Continued steering is unaffected.
+    camera_lkas_on = 1 <= lkas_button <= 3
+
     # pre-engage clean-frame gate
     if handoff_clear:
       self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, PRE_ENGAGE_CLEAN_FRAMES)
     else:
       self.pre_engage_clean_frames = 0
     pre_engage_ok = (self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
-                     and self.lkas_button_settled >= CAMERA_SETTLE_FRAMES)
+                     and self.lkas_button_settled >= CAMERA_SETTLE_FRAMES
+                     and camera_lkas_on)
 
     # Stock lane centering only runs with ACC: the EPS hard-faults if LKAS_Request rides through an
     # ACC-engaged -> off transition, so drop the request at the edge and re-engage via the gates.
@@ -195,7 +200,8 @@ class LkasAngleStateMachine:
 
     # dash feedback while the engage gates run: the press is accepted, steering just hasn't started.
     # Without this the driver re-presses into the settle window and recreates the camera race.
-    self.engage_pending = CC.latActive and not self.suspended and not active
+    # Stays dark when the camera state blocks engagement, so a parity-trapped press visibly didn't take.
+    self.engage_pending = CC.latActive and not self.suspended and not active and camera_lkas_on
 
     self.active_last = active
     return out_angle, active
