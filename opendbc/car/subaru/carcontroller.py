@@ -114,8 +114,8 @@ class CarController(CarControllerBase, SnGCarController):
 
     else:
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
-        # dash mirrors actual actuation (state machine output incl. taper, excl. override suspend)
-        lkas_dash_active = self.angle_sm.active_last and not CS.out.steerFaultPermanent
+        # dash mirrors actuation, plus the engage-gate wait so a button press shows as accepted
+        lkas_dash_active = (self.angle_sm.active_last or self.angle_sm.engage_pending) and not CS.out.steerFaultPermanent
       else:
         # torque cars: hold the LKAS dash bit briefly after ACC disengage so MADS-only doesn't flicker it
         if CC.enabled:

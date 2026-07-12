@@ -97,6 +97,7 @@ class LkasAngleStateMachine:
     self.disengage_taper_remaining = 0
     self.active_last = False
     self.enabled_last = False
+    self.engage_pending = False
     self.planner_angle_filt = 0.0
     self.last_lkas_button = 0
     self.lkas_button_settled = CAMERA_SETTLE_FRAMES
@@ -191,6 +192,10 @@ class LkasAngleStateMachine:
       self.planner_angle_filt = CS.out.steeringAngleDeg
       self.planner.reset(CS.out.steeringAngleDeg)
       out_angle = CS.out.steeringAngleDeg
+
+    # dash feedback while the engage gates run: the press is accepted, steering just hasn't started.
+    # Without this the driver re-presses into the settle window and recreates the camera race.
+    self.engage_pending = CC.latActive and not self.suspended and not active
 
     self.active_last = active
     return out_angle, active
