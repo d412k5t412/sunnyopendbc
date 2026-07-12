@@ -23,7 +23,6 @@ MADS_ONLY_MAX_STEER_ANGLE = 120          # deg
 
 PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
 DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge-falling
-CAMERA_SETTLE_FRAMES = 50                # ~1 s; raising LKAS_Request inside a camera LKAS-state transition hard-faults the EPS
 
 # Roll compensation in actuators.steeringAngleDeg diverges as v -> 0 and cranks the wheel at stops on
 # crowned roads; fade to a roll-free target rebuilt from actuators.curvature when approaching a stop.
@@ -99,8 +98,6 @@ class LkasAngleStateMachine:
     self.enabled_last = False
     self.engage_pending = False
     self.planner_angle_filt = 0.0
-    self.last_lkas_button = 0
-    self.lkas_button_settled = CAMERA_SETTLE_FRAMES
     self.planner = AnglePlanner()
 
   def _target_angle(self, CC, CS) -> float:
@@ -124,16 +121,9 @@ class LkasAngleStateMachine:
                      and abs(target_angle - CS.out.steeringAngleDeg) < RESUME_MAX_TARGET_ERR
                      and not extreme_angle_mads_only)
 
-    # camera-settle gate: block fresh engagement until the camera's LKAS state has been stable ~1 s
-    lkas_button = int(getattr(CS, 'lkas_button', 0))
-    if lkas_button != self.last_lkas_button:
-      self.lkas_button_settled = 0
-      self.last_lkas_button = lkas_button
-    else:
-      self.lkas_button_settled = min(self.lkas_button_settled + 1, CAMERA_SETTLE_FRAMES)
-
     # The EPS validates EyeSight's LKAS state at the request rising edge: every logged fault engaged
     # with the camera state at 0, every clean engagement at 1-3. Continued steering is unaffected.
+    lkas_button = int(getattr(CS, 'lkas_button', 0))
     camera_lkas_on = 1 <= lkas_button <= 3
 
     # pre-engage clean-frame gate
@@ -141,9 +131,7 @@ class LkasAngleStateMachine:
       self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, PRE_ENGAGE_CLEAN_FRAMES)
     else:
       self.pre_engage_clean_frames = 0
-    pre_engage_ok = (self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
-                     and self.lkas_button_settled >= CAMERA_SETTLE_FRAMES
-                     and camera_lkas_on)
+    pre_engage_ok = self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES and camera_lkas_on
 
     # Stock lane centering only runs with ACC: the EPS hard-faults if LKAS_Request rides through an
     # ACC-engaged -> off transition, so drop the request at the edge and re-engage via the gates.
