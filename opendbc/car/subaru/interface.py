@@ -9,6 +9,8 @@ from opendbc.car.subaru.values import CAR, GLOBAL_ES_ADDR, SubaruFlags, SubaruSa
 class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
+  # CVT manual mode (paddle/M-gate "1"-"6", reported as manumatic) is a normal forward driving mode
+  DRIVABLE_GEARS = (structs.CarState.GearShifter.manumatic,)
 
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate: CAR, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:

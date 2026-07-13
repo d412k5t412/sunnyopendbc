@@ -64,7 +64,11 @@ class CarState(CarStateBase, MadsCarState, SnGCarState):
 
     cp_transmission = cp_alt if self.CP.flags & SubaruFlags.HYBRID else cp
     can_gear = int(cp_transmission.vl["Transmission"]["Gear"])
-    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
+    gear_name = self.shifter_values.get(can_gear, None)
+    # CVT manual mode reports individual gears "1"-"6"; treat as manumatic so lateral stays available
+    if gear_name in ("1", "2", "3", "4", "5", "6"):
+      gear_name = "MANUAL"
+    ret.gearShifter = self.parse_gear_shifter(gear_name)
 
     if not (self.CP.flags & SubaruFlags.LKAS_ANGLE):
       ret.steeringAngleDeg = cp.vl["Steering_Torque"]["Steering_Angle"]
