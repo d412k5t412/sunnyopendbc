@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum, IntFlag
 
 from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
+from opendbc.car.lateral import AngleSteeringLimits
 from opendbc.car.structs import CarParams
 from opendbc.car.docs_definitions import CarFootnote, CarHarness, CarDocs, CarParts, Column
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries, p16
@@ -10,6 +11,14 @@ Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
+  ANGLE_LIMITS = AngleSteeringLimits(
+    STEER_ANGLE_MAX=720,
+    # deg per STEER_STEP (20 ms), ~90% of the panda safety lookup at every point.
+    # DOWN is looser than UP: unwinding out of a curve needs high rates and is self-stabilizing.
+    ANGLE_RATE_LIMIT_UP  =([0., 1.5, 5., 15., 35.], [1.2, 1.0, 0.72, 0.54, 0.18]),
+    ANGLE_RATE_LIMIT_DOWN=([0., 1.5, 5., 15., 35.], [1.7, 1.5, 1.05, 0.80, 0.22]),
+  )
+
   def __init__(self, CP):
     self.STEER_STEP = 2                # how often we update the steer cmd
     self.STEER_DELTA_UP = 50           # torque increase per refresh, 0.8s to max
@@ -56,6 +65,7 @@ class SubaruSafetyFlags(IntFlag):
   GEN2 = 1
   LONG = 2
   PREGLOBAL_REVERSED_DRIVER_TORQUE = 4
+  LKAS_ANGLE = 8
 
 
 class SubaruFlags(IntFlag):
