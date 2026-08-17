@@ -21,10 +21,6 @@ ROLL_COMP_FADE_V  = [0.0, 1.0]
 PLANNER_ANGLE_LP_ALPHA_BP = [0., 2.5, 3.5, 4.5, 9., 18., 30.]    # m/s
 PLANNER_ANGLE_LP_ALPHA_V  = [0.06, 0.08, 0.12, 0.20, 0.28, 0.33, 0.30]
 
-# Soft deadzone at creep, applied to deviation from the target trend: kills zero-mean weave while sustained alignment corrections pass through; faded by the maneuver gate, gone by 10 mph
-TARGET_DEADZONE_BP = [0., 1.5, 3.0, 4.5]   # m/s
-TARGET_DEADZONE_V  = [6.0, 6.0, 3.0, 0.0]  # deg
-
 # Maneuver gate: the creep weave is zero-mean near center while real turns carry a sustained large target, so a slow trend of the target (plus fast divergence for sharp entries) blends 0=calm..1=full authority
 MANEUVER_TREND_ALPHA_BP = [0., 2.5, 4.5]   # m/s
 MANEUVER_TREND_ALPHA_V  = [0.01, 0.015, 0.20]
@@ -199,10 +195,7 @@ class LkasAngleStateMachine:
 
       # During taper, chase the live EPS angle for a smooth merge into the inactive path.
       if want_active:
-        # deadzone the deviation from the slow trend (not from pos): sustained corrections ride the trend through so the car stays aligned, only zero-mean jitter is ignored
-        dz = float(np.interp(CS.out.vEgoRaw, TARGET_DEADZONE_BP, TARGET_DEADZONE_V)) * (1.0 - maneuver)
-        dev = self.planner_angle_filt - self.target_trend
-        target = self.target_trend + float(np.sign(dev)) * max(0.0, abs(dev) - dz)
+        target = self.planner_angle_filt
       else:
         target = CS.out.steeringAngleDeg
         maneuver = 1.0
