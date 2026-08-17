@@ -3,11 +3,6 @@ import numpy as np
 
 from opendbc.car.vehicle_model import VehicleModel
 
-DRIVER_OVERRIDE_TORQUE = 170     # log 08/02: resting-hand touches peak 120-170 (brief, no wheel motion); deliberate takeovers peak 250+ so they still trigger instantly
-DRIVER_OVERRIDE_TORQUE_BLINKER = 300     # raised threshold with blinker on so nudges don't suspend during automatic lane changes
-DRIVER_OVERRIDE_TORQUE_RELEASE = 100     # must clear resting-hand torque so light grip doesn't block resume
-WHEEL_SETTLED_RATE = 25.                 # deg/s; torque dips mid-maneuver, wheel motion doesn't
-RESUME_MAX_TARGET_ERR = 20.              # deg; don't take over while plan and hand-held angle disagree
 SUSPEND_HOLD_FRAMES = 25                 # ~0.5 s
 MADS_ONLY_MAX_STEER_ANGLE = 120          # deg
 
@@ -126,18 +121,12 @@ class LkasAngleStateMachine:
 
   def update(self, CC, CS):
     """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
-    torque = abs(CS.out.steeringTorque)
-    blinker_on = CS.out.leftBlinker or CS.out.rightBlinker
-    override_torque = DRIVER_OVERRIDE_TORQUE_BLINKER if blinker_on else DRIVER_OVERRIDE_TORQUE
     extreme_angle = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE
     extreme_angle_mads_only = extreme_angle and not CC.enabled
     target_angle = self._target_angle(CC, CS)
 
-    # handoff is clear only when torque, wheel motion, and plan-vs-hand disagreement are all low
-    handoff_clear = (torque < DRIVER_OVERRIDE_TORQUE_RELEASE
-                     and abs(CS.out.steeringRateDeg) < WHEEL_SETTLED_RATE
-                     and abs(target_angle - CS.out.steeringAngleDeg) < RESUME_MAX_TARGET_ERR
-                     and not extreme_angle_mads_only)
+    # only remaining engage/resume gate: driver isn't holding the wheel past the MADS-only extreme-angle guard
+    handoff_clear = not extreme_angle_mads_only
 
     # pre-engage clean-frame gate: require a clean driver handoff before a fresh engage
     if handoff_clear:
@@ -153,7 +142,7 @@ class LkasAngleStateMachine:
       self.below_release_count = 0
     self.enabled_last = CC.enabled
 
-    # suspend hysteresis on driver override / extreme angle
+    # suspend hysteresis; no driver-torque override — only extreme angle (MADS-only) suspends
     if self.suspended:
       if handoff_clear:
         self.below_release_count += 1
@@ -163,11 +152,11 @@ class LkasAngleStateMachine:
       else:
         self.below_release_count = 0
     else:
-      if torque > override_torque or extreme_angle_mads_only:
+      if extreme_angle_mads_only:
         self.suspended = True
         self.below_release_count = 0
 
-    # latch the engage: a fresh engage needs a clean handoff, a continued engage rides active_last; driver override or loss of latActive disengages
+    # latch the engage: a fresh engage needs a clean handoff, a continued engage rides active_last; loss of latActive or extreme-angle suspension disengages
     raw_want = CC.latActive and not self.suspended
     if raw_want and (self.active_last or pre_engage_ok):
       self.engaged = True
