@@ -254,21 +254,13 @@ static safety_config subaru_init(uint16_t param) {
     SUBARU_COMMON_TX_MSGS(SUBARU_MAIN_BUS)
   };
 
-  static const CanMsg SUBARU_LKAS_ANGLE_GEN1_LONG_TX_MSGS[] = {
-    SUBARU_BASE_TX_MSGS(SUBARU_MAIN_BUS, MSG_SUBARU_ES_LKAS_ANGLE)
-    SUBARU_COMMON_LONG_TX_MSGS(SUBARU_MAIN_BUS)
-  };
-
   static const CanMsg SUBARU_LKAS_ANGLE_GEN2_TX_MSGS[] = {
     SUBARU_BASE_TX_MSGS(SUBARU_ALT_BUS, MSG_SUBARU_ES_LKAS_ANGLE)
     SUBARU_COMMON_TX_MSGS(SUBARU_ALT_BUS)
   };
 
-  static const CanMsg SUBARU_LKAS_ANGLE_GEN2_LONG_TX_MSGS[] = {
-    SUBARU_BASE_TX_MSGS(SUBARU_ALT_BUS, MSG_SUBARU_ES_LKAS_ANGLE)
-    SUBARU_COMMON_LONG_TX_MSGS(SUBARU_ALT_BUS)
-    SUBARU_GEN2_LONG_ADDITIONAL_TX_MSGS()
-  };
+  // Subaru longitudinal is disabled in sunnypilot (see: "subaru: disable alpha long for now"); long TX msg
+  // arrays that depend on undefined SUBARU_*_LONG_* macros are omitted until long support is restored.
 
   static RxCheck subaru_rx_checks[] = {
     SUBARU_COMMON_RX_CHECKS(SUBARU_MAIN_BUS)
@@ -298,21 +290,18 @@ static safety_config subaru_init(uint16_t param) {
   // revert this in the PR that re-enables Subaru longitudinal: https://github.com/commaai/opendbc/pull/3689
 
   safety_config ret;
+  // subaru_longitudinal is currently ignored: long is disabled in sunnypilot ("subaru: disable alpha long for now")
   if (subaru_lkas_angle) {
     if (subaru_gen2) {
-      ret = subaru_longitudinal ? BUILD_SAFETY_CFG(subaru_lkas_angle_gen2_rx_checks, SUBARU_LKAS_ANGLE_GEN2_LONG_TX_MSGS) :
-                                  BUILD_SAFETY_CFG(subaru_lkas_angle_gen2_rx_checks, SUBARU_LKAS_ANGLE_GEN2_TX_MSGS);
+      ret = BUILD_SAFETY_CFG(subaru_lkas_angle_gen2_rx_checks, SUBARU_LKAS_ANGLE_GEN2_TX_MSGS);
     } else {
-      ret = subaru_longitudinal ? BUILD_SAFETY_CFG(subaru_lkas_angle_gen1_rx_checks, SUBARU_LKAS_ANGLE_GEN1_LONG_TX_MSGS) :
-                                  BUILD_SAFETY_CFG(subaru_lkas_angle_gen1_rx_checks, SUBARU_LKAS_ANGLE_GEN1_TX_MSGS);
+      ret = BUILD_SAFETY_CFG(subaru_lkas_angle_gen1_rx_checks, SUBARU_LKAS_ANGLE_GEN1_TX_MSGS);
     }
   } else if (subaru_gen2) {
-    ret = subaru_longitudinal ? BUILD_SAFETY_CFG(subaru_gen2_rx_checks, SUBARU_GEN2_LONG_TX_MSGS) :
-                                BUILD_SAFETY_CFG(subaru_gen2_rx_checks, SUBARU_GEN2_TX_MSGS);
+    ret = BUILD_SAFETY_CFG(subaru_gen2_rx_checks, SUBARU_GEN2_TX_MSGS);
   } else {
-    ret = subaru_longitudinal ? BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_LONG_TX_MSGS) :
-          subaru_stop_and_go  ? BUILD_SAFETY_CFG(subaru_rx_checks, subaru_stop_and_go_tx_msgs) :
-                                BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_TX_MSGS);
+    ret = subaru_stop_and_go ? BUILD_SAFETY_CFG(subaru_rx_checks, subaru_stop_and_go_tx_msgs) :
+                               BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_TX_MSGS);
   }
   return ret;
 }
