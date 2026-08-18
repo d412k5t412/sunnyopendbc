@@ -72,8 +72,8 @@
   {.msg = {{MSG_SUBARU_ES_DashStatus,   SUBARU_CAM_BUS,  8, 10U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
 
 static bool subaru_gen2 = false;
-static bool subaru_longitudinal = false;
 static bool subaru_lkas_angle = false;
+// subaru_longitudinal removed with the long TX paths: long is disabled in sunnypilot ("subaru: disable alpha long for now")
 
 static uint32_t subaru_get_checksum(const CANPacket_t *msg) {
   return (uint8_t)msg->data[0];
