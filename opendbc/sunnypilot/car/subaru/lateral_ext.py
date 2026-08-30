@@ -43,9 +43,9 @@ class AnglePlanner:
   MAX_ACCEL_BP = [0., 3.1, 5., 15., 35.]             # m/s
   MAX_ACCEL_V  = [0.025, 0.032, 0.035, 0.030, 0.012] # deg/frame^2
 
-  # Scale accel up with error so big maneuvers (lane changes, recovery) don't feel sluggish.
-  ERR_SCALE_BP = [1.5, 15.0]                         # deg wheel
-  ERR_SCALE_V  = [1.0, 3.0]
+  # Scale accel up with error so big maneuvers (lane changes, recovery) don't feel sluggish; 08/xx logs showed steerSaturated on 30mph curve entries where accel spin-up was too slow to track a 25 deg/s desired ramp
+  ERR_SCALE_BP = [1.0, 5.0, 15.0]                    # deg wheel
+  ERR_SCALE_V  = [1.0, 3.0, 6.0]
 
   # Scale peak rate up with error so sharp turns slew faster; min() against ANGLE_LIMITS still bounds the product
   RATE_ERR_SCALE_BP = [2.5, 10.0, 25.0]              # deg wheel
@@ -73,7 +73,7 @@ class AnglePlanner:
     rate_lim       = self.angle_limits.ANGLE_RATE_LIMIT_UP if winding_up else self.angle_limits.ANGLE_RATE_LIMIT_DOWN
     max_rate       = min(base_max_rate * rate_boost, float(np.interp(v_ego, rate_lim[0], rate_lim[1])))
     base_max_accel = float(np.interp(v_ego, self.MAX_ACCEL_BP, self.MAX_ACCEL_V))
-    max_accel = base_max_accel * float(np.interp(abs(err), self.ERR_SCALE_BP, self.ERR_SCALE_V)) * (1. + 2. * maneuver)
+    max_accel = base_max_accel * float(np.interp(abs(err), self.ERR_SCALE_BP, self.ERR_SCALE_V)) * (1. + 5. * maneuver)
 
     # v^2 = 2 a d  ->  brake distance to reach 0 from |vel| at max_accel
     brake_dist = (self.vel * self.vel) / (2.0 * max_accel) if max_accel > 0.0 else 0.0
