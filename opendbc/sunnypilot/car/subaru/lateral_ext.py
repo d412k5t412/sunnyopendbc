@@ -32,9 +32,10 @@ CURV_DEADBAND_BP  = [0.,     4.5,    9.]                      # m/s
 CURV_DEADBAND_V   = [0.0004, 0.0002, 0.0]                     # 1/m; kill zero-mean dead-zone weave
 CURV_MAX_BP       = [0.,   2.5,   4.5,   9.,    15.]          # m/s
 CURV_MAX_V        = [0.030, 0.028, 0.022, 0.015, 0.010]       # 1/m; cap real turns (0.030 @ rest ~= 68deg wheel; the LPF+deadband still kills sub-turn noise)
-# Filtered curvature-derived angle at low speed, raw actuators.steeringAngleDeg (with roll comp) at highway.
-CURV_BLEND_BP     = [5.,   15.]
-CURV_BLEND_V      = [0.0,  1.0]
+# Split raw MPC angle into (curvature-derived) + (roll comp); filter each separately so road crown doesn't push the car sideways at low speed (2026-09-04).
+ROLL_COMP_ALPHA   = 0.02                                      # slow LPF on roll comp (~500 ms)
+ROLL_COMP_FADE_BP = [1.5, 4.0]                                # m/s; fade in above walking pace
+ROLL_COMP_FADE_V  = [0.0, 1.0]
 
 # Freeze the maneuver gate at 0 below creep so it can't limit-cycle open/closed (CALM<->OPEN is 4x rate jump).
 MANEUVER_SPEED_GATE_BP = [2.0, 3.5]         # m/s
@@ -119,35 +120,41 @@ class LkasAngleStateMachine:
     self.planner_angle_filt = 0.0
     self.target_trend = 0.0
     self.curvature_filt = 0.0
+    self.roll_comp_filt = 0.0
     self.planner = AnglePlanner(angle_limits)
 
   def _target_angle(self, CC, CS) -> float:
-    """Filter/clip curvature upstream of the low-speed angle blow-up, then speed-blend against raw actuators.steeringAngleDeg."""
+    """Filter/clip curvature-derived turn intent; preserve roll comp separately so we don't drift with road crown."""
     v = CS.out.vEgoRaw
     raw_curv = CC.actuators.curvature
 
-    # LPF in curvature space: slow at near-zero (noise), fast when raw curvature is turn-sized (immediate turn-in).
+    # Extract the roll-comp portion of the raw MPC angle (what the MPC added beyond a pure-curvature bicycle model).
+    raw_ang_no_roll = math.degrees(self.VM.get_steer_from_curvature(-raw_curv, v, 0.0))
+    roll_comp_raw = CC.actuators.steeringAngleDeg - raw_ang_no_roll
+    self.roll_comp_filt = ROLL_COMP_ALPHA * roll_comp_raw + (1.0 - ROLL_COMP_ALPHA) * self.roll_comp_filt
+
+    # LPF on curvature: slow at near-zero (kills noise), fast when raw curvature is turn-sized (immediate turn-in).
     alpha_slow = float(np.interp(v, CURV_LP_ALPHA_BP, CURV_LP_ALPHA_V))
     alpha_mag  = float(np.interp(abs(raw_curv), CURV_MAG_ALPHA_BP, CURV_MAG_ALPHA_V))
     alpha = max(alpha_slow, alpha_mag)
     self.curvature_filt = alpha * raw_curv + (1.0 - alpha) * self.curvature_filt
 
-    # Deadband: pull small signed values toward 0 to kill zero-mean weave
+    # Deadband: pull small signed values toward 0 to kill zero-mean weave.
     db = float(np.interp(v, CURV_DEADBAND_BP, CURV_DEADBAND_V))
     if abs(self.curvature_filt) <= db:
       c_out = 0.0
     else:
       c_out = self.curvature_filt - math.copysign(db, self.curvature_filt)
 
-    # Clip: cap absolute curvature demand (allows sharp turns up to ~68 deg wheel at rest, ~30 deg at 34 mph).
+    # Clip: cap absolute curvature demand (~68 deg wheel at rest, ~30 deg at 34 mph); roll comp is added on top of this.
     c_max = float(np.interp(v, CURV_MAX_BP, CURV_MAX_V))
     c_out = max(-c_max, min(c_max, c_out))
 
     angle_from_curv = math.degrees(self.VM.get_steer_from_curvature(-c_out, v, 0.0))
 
-    # Speed-blend filtered curvature path (low speed) vs. raw angle carrying roll comp (highway).
-    w = float(np.interp(v, CURV_BLEND_BP, CURV_BLEND_V))
-    return w * CC.actuators.steeringAngleDeg + (1.0 - w) * angle_from_curv
+    # Fade roll comp in above walking pace where the get_steer_from_curvature inverse becomes numerically stable.
+    roll_scale = float(np.interp(v, ROLL_COMP_FADE_BP, ROLL_COMP_FADE_V))
+    return angle_from_curv + roll_scale * self.roll_comp_filt
 
   def update(self, CC, CS):
     """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
@@ -198,6 +205,9 @@ class LkasAngleStateMachine:
       self.planner_angle_filt = CS.out.steeringAngleDeg
       self.target_trend = CS.out.steeringAngleDeg
       self.curvature_filt = CC.actuators.curvature   # start synced so first frame doesn't step
+      # sync roll-comp estimate to the current MPC delta so re-engage doesn't step the target
+      _no_roll = math.degrees(self.VM.get_steer_from_curvature(-CC.actuators.curvature, CS.out.vEgoRaw, 0.0))
+      self.roll_comp_filt = CC.actuators.steeringAngleDeg - _no_roll
       self.planner.reset(CS.out.steeringAngleDeg)
 
     # Taper holds LKAS_Request high briefly on clean disengage so the EyeSight watchdog doesn't
@@ -244,6 +254,8 @@ class LkasAngleStateMachine:
       self.planner_angle_filt = CS.out.steeringAngleDeg
       self.target_trend = CS.out.steeringAngleDeg
       self.curvature_filt = CC.actuators.curvature
+      _no_roll = math.degrees(self.VM.get_steer_from_curvature(-CC.actuators.curvature, CS.out.vEgoRaw, 0.0))
+      self.roll_comp_filt = CC.actuators.steeringAngleDeg - _no_roll
       self.planner.reset(CS.out.steeringAngleDeg)
       out_angle = CS.out.steeringAngleDeg
 
