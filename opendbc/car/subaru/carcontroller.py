@@ -54,7 +54,7 @@ class CarController(CarControllerBase, SnGCarController):
 
   def handle_angle_lateral(self, CC, CS):
     # sunnypilot: override / engage shaping + jerk-limited planner; `active` stays True during the disengage taper.
-    planner_angle, active = self.angle_sm.update(CC, CS)
+    planner_angle, active = self.angle_sm.update(CC, CS, vp=getattr(self, 'vp', None))
     apply_angle = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last,
                                                CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                active, self.p.ANGLE_LIMITS)

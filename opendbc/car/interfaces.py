@@ -116,9 +116,10 @@ class CarInterfaceBase(ABC, CarInterfaceBaseSP):
     dbc_names = {bus: cp.dbc_name for bus, cp in self.can_parsers.items()}
     self.CC: CarControllerBase = self.CarController(dbc_names, CP, CP_SP)
 
-  def apply(self, c: structs.CarControl, c_sp: structs.CarControlSP, now_nanos: int | None = None) -> tuple[structs.CarControl.Actuators, list[CanData]]:
+  def apply(self, c: structs.CarControl, c_sp: structs.CarControlSP, now_nanos: int | None = None, vp=None) -> tuple[structs.CarControl.Actuators, list[CanData]]:
     if now_nanos is None:
       now_nanos = int(time.monotonic() * 1e9)
+    self.CC.vp = vp   # stash for carcontrollers that use paramsd live values; others ignore.
     return self.CC.update(c, c_sp, self.CS, now_nanos)
 
   @staticmethod

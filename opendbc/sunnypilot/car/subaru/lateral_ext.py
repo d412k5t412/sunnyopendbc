@@ -156,8 +156,11 @@ class LkasAngleStateMachine:
     roll_scale = float(np.interp(v, ROLL_COMP_FADE_BP, ROLL_COMP_FADE_V))
     return angle_from_curv + roll_scale * self.roll_comp_filt
 
-  def update(self, CC, CS):
+  def update(self, CC, CS, vp=None):
     """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
+    # Track paramsd's live steerRatio / stiffnessFactor so our VM matches openpilot's runtime math.
+    if vp is not None:
+      self.VM.update_params(max(vp.stiffnessFactor, 0.1), max(vp.steerRatio, 0.1))
     extreme_angle = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE
     extreme_angle_mads_only = extreme_angle and not CC.enabled
     target_angle = self._target_angle(CC, CS)
