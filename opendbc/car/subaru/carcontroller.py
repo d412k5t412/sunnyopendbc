@@ -1,9 +1,9 @@
 import numpy as np
 from opendbc.can import CANPacker
-from opendbc.car import Bus, DT_CTRL, make_tester_present_msg
+from opendbc.car import Bus, DT_CTRL, make_tester_present_msg, structs
 from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance
-from opendbc.car.interfaces import CarControllerBase
+from opendbc.car.interfaces import CarControllerBase, CarStateBase
 from opendbc.car.subaru import subarucan
 from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
 
@@ -25,7 +25,8 @@ ENGAGE_DASH_LEAD_FRAMES = 8              # latched engage prevents stranded dash
 PLANNER_ANGLE_LP_ALPHA    = ([0., 4.5, 6.7], [0.02, 0.02, 0.20])   # m/s -> alpha; very heavy under 10 mph (kills low-speed wobble), ramps to 0.20 baseline by 15 mph
 
 class LkasAngleStateMachine:
-  def __init__(self, CP, angle_limits):
+  """gen2 LKAS_ANGLE state machine: engage/disengage shaping, MADS-only extreme-angle suspend, dash-vs-request lead, and a speed-scheduled LPF on MPC's steering angle."""
+  def __init__(self, CP: structs.CarParams, angle_limits):
     self.suspended = False
     self.below_release_count = 0
     self.pre_engage_clean_frames = 0
@@ -37,7 +38,7 @@ class LkasAngleStateMachine:
     self.enabled_last = False
     self.planner_angle_lpf = FirstOrderFilter(0.0, DT_CTRL/PLANNER_ANGLE_LP_ALPHA[1][0] - DT_CTRL, DT_CTRL)
 
-  def update(self, CC, CS):
+  def update(self, CC: structs.CarControl, CS: CarStateBase) -> tuple[float, bool]:
     """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
     extreme_angle_mads_only = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE and not CC.enabled
     target_angle = CC.actuators.steeringAngleDeg
