@@ -2,7 +2,7 @@ import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, make_tester_present_msg, structs
 from opendbc.car.common.filter_simple import FirstOrderFilter
-from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance
+from opendbc.car.lateral import AngleSteeringLimits, apply_driver_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance
 from opendbc.car.interfaces import CarControllerBase, CarStateBase
 from opendbc.car.subaru import subarucan
 from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
@@ -24,9 +24,10 @@ ENGAGE_DASH_LEAD_FRAMES = 8              # latched engage prevents stranded dash
 # Speed-scheduled: heavy smoothing under 15 mph kills the low-speed reversal/wobble; flat 0.20 above.
 PLANNER_ANGLE_LP_ALPHA    = ([0., 4.5, 6.7], [0.02, 0.02, 0.20])   # m/s -> alpha; very heavy under 10 mph (kills low-speed wobble), ramps to 0.20 baseline by 15 mph
 
+
 class LkasAngleStateMachine:
   """gen2 LKAS_ANGLE state machine: engage/disengage shaping, MADS-only extreme-angle suspend, dash-vs-request lead, and a speed-scheduled LPF on MPC's steering angle."""
-  def __init__(self, CP: structs.CarParams, angle_limits):
+  def __init__(self, CP: structs.CarParams, angle_limits: AngleSteeringLimits):
     self.suspended = False
     self.below_release_count = 0
     self.pre_engage_clean_frames = 0
@@ -106,6 +107,7 @@ class LkasAngleStateMachine:
     self.dash_active = dash_active
     self.active_last = request_active
     return out_angle, request_active
+
 
 class CarController(CarControllerBase, SnGCarController):
   def __init__(self, dbc_names, CP, CP_SP):
