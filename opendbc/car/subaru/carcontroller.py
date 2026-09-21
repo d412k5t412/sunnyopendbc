@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, make_tester_present_msg
@@ -9,8 +10,7 @@ from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarController
 
 from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 
-# FIXME: These limits aren't exact. The real limit is more than likely over a larger time period and
-# involves the total steering angle change rather than rate, but these limits work well for now
+# FIXME: not exact — real limit is likely over a larger time period on total angle change; these work for now.
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
@@ -20,16 +20,20 @@ PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
 DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge-falling
 ENGAGE_DASH_LEAD_FRAMES = 8              # latched engage prevents stranded dash
 
-# Only smoothing in the pipeline: MPC's steeringAngleDeg -> this LPF -> panda rate limit.
-# Speed-scheduled: heavy smoothing under 15 mph kills the low-speed reversal/wobble; flat 0.20 above.
+# Only smoothing in pipeline (MPC -> LPF -> panda rate limit); speed-scheduled: heavy under 15 mph, flat 0.20 above.
 PLANNER_ANGLE_LP_ALPHA    = ([0., 4.5, 6.7], [0.02, 0.02, 0.20])   # m/s -> alpha; very heavy under 10 mph (kills low-speed wobble), ramps to 0.20 baseline by 15 mph
 # Stickiness: if the LPF's proposed command changes by less than this per frame, hold. Kills sub-7.5°/s fidget without touching real turns.
 COMMAND_DEADBAND          = 0.15   # deg per 20 ms (same-direction motion)
 # Reversal deadband: brief in-turn wobbles that try to flip wheel direction get held unless the reversal is bigger than this. Real turn exits exceed it.
 REVERSAL_DEADBAND         = 0.30   # deg per 20 ms (opposite-direction motion)
+# Physics safety cap: max lateral accel (3.6 = ISO 11270 3.0 + 6% road-bank tolerance; matches comma default).
+MAX_LATERAL_ACCEL         = 3.6    # m/s^2
+STEER_STIFFNESS_K         = 0.0015 # per (m/s)^2, tire-slip term in the bicycle model (matches VehicleModel default)
 
 class LkasAngleStateMachine:
   def __init__(self, CP, angle_limits):
+    self.wheelbase = CP.wheelbase        # for MAX_LATERAL_ACCEL cap (bicycle model)
+    self.steer_ratio = CP.steerRatio     # static ratio; paramsd live SR is applied by MPC upstream
     self.suspended = False
     self.below_release_count = 0
     self.pre_engage_clean_frames = 0
@@ -47,6 +51,10 @@ class LkasAngleStateMachine:
     """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
     extreme_angle_mads_only = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE and not CC.enabled
     target_angle = CC.actuators.steeringAngleDeg
+    # Physics cap: clip MPC's request to what MAX_LATERAL_ACCEL allows at current speed.
+    v = max(CS.out.vEgoRaw, 1.0)
+    max_angle = math.degrees((MAX_LATERAL_ACCEL / (v * v)) * self.wheelbase * self.steer_ratio * (1.0 + STEER_STIFFNESS_K * v * v))
+    target_angle = max(-max_angle, min(max_angle, target_angle))
 
     # only engage gate: not past the MADS-only extreme-angle guard.
     handoff_clear = not extreme_angle_mads_only
@@ -105,8 +113,7 @@ class LkasAngleStateMachine:
       self.planner_angle_lpf.update(target_angle)
       # During taper, chase the live EPS angle for a smooth merge into the inactive path.
       proposed = self.planner_angle_lpf.x if want_active else CS.out.steeringAngleDeg
-      # Direction-aware stickiness: same-direction motion has a small deadband;
-      # reversals need a bigger delta to accept, killing in-turn wobble without blocking real turn exits.
+      # Direction-aware stickiness: same-direction has small deadband; reversals need larger delta to accept.
       delta = proposed - self.last_commanded
       reversing = self.last_delta_sign != 0.0 and (delta * self.last_delta_sign) < 0
       threshold = REVERSAL_DEADBAND if reversing else COMMAND_DEADBAND
@@ -204,8 +211,7 @@ class CarController(CarControllerBase, SnGCarController):
     # *** alerts and pcm cancel ***
     if self.CP.flags & SubaruFlags.PREGLOBAL:
       if self.frame % 5 == 0:
-        # 1 = main, 2 = set shallow, 3 = set deep, 4 = resume shallow, 5 = resume deep
-        # disengage ACC when OP is disengaged
+        # cruise btns: 1=main 2=set-shallow 3=set-deep 4=resume-shallow 5=resume-deep; disengage ACC when OP off.
         if pcm_cancel_cmd:
           cruise_button = 1
         # turn main on if off and past start-up state
@@ -250,8 +256,7 @@ class CarController(CarControllerBase, SnGCarController):
           can_sends.append(subarucan.create_es_distance(self.packer, self.frame // 5, CS.es_distance_msg, 0, pcm_cancel_cmd,
                                                         self.CP.openpilotLongitudinalControl, cruise_brake > 0, cruise_throttle))
       else:
-        # skip while braking: the car cancels ACC itself, and our forged-counter frame colliding with
-        # the camera's live ES_Distance stream can fault EyeSight and the EPS
+        # skip while braking: car cancels ACC itself; forged-counter frame vs camera's live ES_Distance can fault EyeSight/EPS.
         if pcm_cancel_cmd and not CS.out.brakePressed:
           if not (self.CP.flags & SubaruFlags.HYBRID):
             bus = CanBus.alt if self.CP.flags & SubaruFlags.GLOBAL_GEN2 else CanBus.main
