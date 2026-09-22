@@ -22,10 +22,6 @@ ENGAGE_DASH_LEAD_FRAMES = 8              # latched engage prevents stranded dash
 
 # Only smoothing in pipeline (MPC -> LPF -> panda rate limit); speed-scheduled: heavy under 15 mph, flat 0.20 above.
 PLANNER_ANGLE_LP_ALPHA    = ([0., 4.5, 6.7], [0.02, 0.02, 0.20])   # m/s -> alpha; very heavy under 10 mph (kills low-speed wobble), ramps to 0.20 baseline by 15 mph
-# Stickiness: if the LPF's proposed command changes by less than this per frame, hold. Kills sub-7.5°/s fidget without touching real turns.
-COMMAND_DEADBAND          = 0.15   # deg per 20 ms (same-direction motion)
-# Reversal deadband: brief in-turn wobbles that try to flip wheel direction get held unless the reversal is bigger than this. Real turn exits exceed it.
-REVERSAL_DEADBAND         = 0.30   # deg per 20 ms (opposite-direction motion)
 # Physics safety cap: max lateral accel (3.6 = ISO 11270 3.0 + 6% road-bank tolerance; matches comma default).
 MAX_LATERAL_ACCEL         = 3.6    # m/s^2
 STEER_STIFFNESS_K         = 0.0015 # per (m/s)^2, tire-slip term in the bicycle model (matches VehicleModel default)
@@ -44,8 +40,6 @@ class LkasAngleStateMachine:
     self.engaged = False
     self.enabled_last = False
     self.planner_angle_lpf = FirstOrderFilter(0.0, DT_CTRL/PLANNER_ANGLE_LP_ALPHA[1][0] - DT_CTRL, DT_CTRL)
-    self.last_commanded = 0.0
-    self.last_delta_sign = 0.0   # +1/-1/0: direction of last accepted change
 
   def update(self, CC, CS):
     """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
@@ -93,8 +87,6 @@ class LkasAngleStateMachine:
 
     if want_active and not self.active_last:
       self.planner_angle_lpf.x = CS.out.steeringAngleDeg
-      self.last_commanded = CS.out.steeringAngleDeg
-      self.last_delta_sign = 0.0
 
     # Taper holds LKAS_Request briefly on clean disengage (EyeSight watchdog); bypassed when suspended.
     self.disengage_taper_remaining = DISENGAGE_TAPER_FRAMES if want_active else max(0, self.disengage_taper_remaining - 1)
@@ -112,21 +104,11 @@ class LkasAngleStateMachine:
       self.planner_angle_lpf.update_alpha(DT_CTRL/alpha - DT_CTRL)
       self.planner_angle_lpf.update(target_angle)
       # During taper, chase the live EPS angle for a smooth merge into the inactive path.
-      proposed = self.planner_angle_lpf.x if want_active else CS.out.steeringAngleDeg
-      # Direction-aware stickiness: same-direction has small deadband; reversals need larger delta to accept.
-      delta = proposed - self.last_commanded
-      reversing = self.last_delta_sign != 0.0 and (delta * self.last_delta_sign) < 0
-      threshold = REVERSAL_DEADBAND if reversing else COMMAND_DEADBAND
-      if abs(delta) < threshold:
-        proposed = self.last_commanded
-      elif delta != 0.0:
-        self.last_delta_sign = 1.0 if delta > 0 else -1.0
-      out_angle = proposed
+      out_angle = self.planner_angle_lpf.x if want_active else CS.out.steeringAngleDeg
     else:
       # inactive or holding for the lead: pin state to measured so LKAS_Request rises from zero error
       self.planner_angle_lpf.x = CS.out.steeringAngleDeg
       out_angle = CS.out.steeringAngleDeg
-    self.last_commanded = out_angle
 
     self.dash_active = dash_active
     self.active_last = request_active
