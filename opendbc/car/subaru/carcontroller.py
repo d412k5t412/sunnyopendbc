@@ -10,7 +10,7 @@ from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarController
 
 from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 
-# FIXME: not exact — real limit is likely over a larger time period on total angle change; these work for now.
+# EPS rate guard for torque-controlled Subarus (Impreza/Forester); LKAS_ANGLE cars like the 2023 Outback skip this.
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
