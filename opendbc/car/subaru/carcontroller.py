@@ -20,7 +20,7 @@ PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
 DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge-falling
 ENGAGE_DASH_LEAD_FRAMES = 8              # latched engage prevents stranded dash
 
-# Only smoothing in pipeline (MPC -> LPF -> panda rate limit); speed-scheduled: heavy under 15 mph, flat 0.20 above.
+# Only smoothing in pipeline (MPC -> LPF -> panda rate limit); LPF ticks every 10 ms, CAN sends every 20 ms.
 PLANNER_ANGLE_LP_ALPHA    = ([0., 4.5, 6.7], [0.02, 0.02, 0.20])   # m/s -> alpha; very heavy under 10 mph (kills low-speed wobble), ramps to 0.20 baseline by 15 mph
 # Physics safety cap: max lateral accel (3.6 = ISO 11270 3.0 + 6% road-bank tolerance; matches comma default).
 MAX_LATERAL_ACCEL         = 3.6    # m/s^2
@@ -41,14 +41,25 @@ class LkasAngleStateMachine:
     self.enabled_last = False
     self.planner_angle_lpf = FirstOrderFilter(0.0, DT_CTRL/PLANNER_ANGLE_LP_ALPHA[1][0] - DT_CTRL, DT_CTRL)
 
-  def update(self, CC, CS):
-    """Returns (commanded_angle, active) — feed to apply_std_steer_angle_limits."""
-    extreme_angle_mads_only = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE and not CC.enabled
-    target_angle = CC.actuators.steeringAngleDeg
-    # Physics cap: clip MPC's request to what MAX_LATERAL_ACCEL allows at current speed.
+  def _physics_capped_target(self, CC, CS):
+    # Clip MPC's request to what MAX_LATERAL_ACCEL allows at current speed (bicycle-model curvature -> wheel angle).
     v = max(CS.out.vEgoRaw, 1.0)
     max_angle = math.degrees((MAX_LATERAL_ACCEL / (v * v)) * self.wheelbase * self.steer_ratio * (1.0 + STEER_STIFFNESS_K * v * v))
-    target_angle = max(-max_angle, min(max_angle, target_angle))
+    return max(-max_angle, min(max_angle, CC.actuators.steeringAngleDeg))
+
+  def step_filter(self, CC, CS):
+    """Advance the LPF every control tick (100 Hz), independent of STEER_STEP CAN cadence."""
+    if self.engaged:
+      alpha = float(np.interp(CS.out.vEgoRaw, *PLANNER_ANGLE_LP_ALPHA))
+      self.planner_angle_lpf.update_alpha(DT_CTRL/alpha - DT_CTRL)
+      self.planner_angle_lpf.update(self._physics_capped_target(CC, CS))
+    else:
+      # inactive: pin to measured so re-engage starts from where the wheel actually is.
+      self.planner_angle_lpf.x = CS.out.steeringAngleDeg
+
+  def update(self, CC, CS):
+    """State machine, called on STEER_STEP ticks. Returns (commanded_angle, active). Filter is advanced separately."""
+    extreme_angle_mads_only = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE and not CC.enabled
 
     # only engage gate: not past the MADS-only extreme-angle guard.
     handoff_clear = not extreme_angle_mads_only
@@ -99,15 +110,10 @@ class LkasAngleStateMachine:
     request_active = dash_active and (self.active_last or self.dash_active_frames >= ENGAGE_DASH_LEAD_FRAMES)
 
     if request_active:
-      # LPF the target with speed-scheduled alpha; apply_std_steer_angle_limits enforces the hard rate cap.
-      alpha = float(np.interp(CS.out.vEgoRaw, *PLANNER_ANGLE_LP_ALPHA))
-      self.planner_angle_lpf.update_alpha(DT_CTRL/alpha - DT_CTRL)
-      self.planner_angle_lpf.update(target_angle)
+      # Use the LPF state advanced by step_filter(); apply_std_steer_angle_limits enforces the hard rate cap.
       # During taper, chase the live EPS angle for a smooth merge into the inactive path.
       out_angle = self.planner_angle_lpf.x if want_active else CS.out.steeringAngleDeg
     else:
-      # inactive or holding for the lead: pin state to measured so LKAS_Request rises from zero error
-      self.planner_angle_lpf.x = CS.out.steeringAngleDeg
       out_angle = CS.out.steeringAngleDeg
 
     self.dash_active = dash_active
@@ -168,6 +174,9 @@ class CarController(CarControllerBase, SnGCarController):
     can_sends = []
 
     # *** steering ***
+    if self.CP.flags & SubaruFlags.LKAS_ANGLE:
+      # Advance the LPF at the full 100 Hz control rate so its dynamics don't depend on STEER_STEP.
+      self.angle_sm.step_filter(CC, CS)
     if (self.frame % self.p.STEER_STEP) == 0:
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
         can_sends.append(self.handle_angle_lateral(CC, CS))
