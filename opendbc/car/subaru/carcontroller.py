@@ -21,7 +21,7 @@ DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge
 ENGAGE_DASH_LEAD_FRAMES = 8              # latched engage prevents stranded dash
 
 # Only smoothing in pipeline (MPC -> LPF -> panda rate limit); LPF ticks every 10 ms, CAN sends every 20 ms.
-PLANNER_ANGLE_LP_ALPHA    = ([0., 4.5, 6.7], [0.02, 0.02, 0.20])   # m/s -> alpha; very heavy under 10 mph (kills low-speed wobble), ramps to 0.20 baseline by 15 mph
+PLANNER_ANGLE_LP_TAU      = ([5., 10., 20.], [0.3, 0.1, 0.0])      # m/s -> tau (s); smooths under 20 mph, identity above 45 mph
 # Physics safety cap: max lateral accel (3.6 = ISO 11270 3.0 + 6% road-bank tolerance; matches comma default).
 MAX_LATERAL_ACCEL         = 3.6    # m/s^2
 STEER_STIFFNESS_K         = 0.0015 # per (m/s)^2, tire-slip term in the bicycle model (matches VehicleModel default)
@@ -39,7 +39,7 @@ class LkasAngleStateMachine:
     self.dash_active_frames = 0
     self.engaged = False
     self.enabled_last = False
-    self.planner_angle_lpf = FirstOrderFilter(0.0, DT_CTRL/PLANNER_ANGLE_LP_ALPHA[1][0] - DT_CTRL, DT_CTRL)
+    self.planner_angle_lpf = FirstOrderFilter(0.0, PLANNER_ANGLE_LP_TAU[1][0], DT_CTRL)
 
   def _physics_capped_target(self, CC, CS):
     # Clip MPC's request to what MAX_LATERAL_ACCEL allows at current speed (bicycle-model curvature -> wheel angle).
@@ -50,8 +50,8 @@ class LkasAngleStateMachine:
   def step_filter(self, CC, CS):
     """Advance the LPF every control tick (100 Hz), independent of STEER_STEP CAN cadence."""
     if self.engaged:
-      alpha = float(np.interp(CS.out.vEgoRaw, *PLANNER_ANGLE_LP_ALPHA))
-      self.planner_angle_lpf.update_alpha(DT_CTRL/alpha - DT_CTRL)
+      # FirstOrderFilter.update_alpha() takes tau, despite the name.
+      self.planner_angle_lpf.update_alpha(float(np.interp(CS.out.vEgo, *PLANNER_ANGLE_LP_TAU)))
       self.planner_angle_lpf.update(self._physics_capped_target(CC, CS))
     else:
       # inactive: pin to measured so re-engage starts from where the wheel actually is.
