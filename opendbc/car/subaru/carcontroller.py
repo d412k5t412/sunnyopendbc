@@ -59,12 +59,8 @@ class LkasAngleStateMachine:
 
   def update(self, CC, CS):
     """State machine, called on STEER_STEP ticks. Returns (commanded_angle, active). Filter is advanced separately."""
-    extreme_angle_mads_only = abs(CS.out.steeringAngleDeg) > MADS_ONLY_MAX_STEER_ANGLE and not CC.enabled
-
-    # only engage gate: not past the MADS-only extreme-angle guard.
-    handoff_clear = not extreme_angle_mads_only
-
-    # require a clean driver handoff before a fresh engage.
+    # Handoff gate: below MADS-only extreme-angle guard, or CC.enabled overrides it.
+    handoff_clear = abs(CS.out.steeringAngleDeg) <= MADS_ONLY_MAX_STEER_ANGLE or CC.enabled
     self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, PRE_ENGAGE_CLEAN_FRAMES) if handoff_clear else 0
     pre_engage_ok = self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
 
@@ -74,47 +70,35 @@ class LkasAngleStateMachine:
       self.below_release_count = 0
     self.enabled_last = CC.enabled
 
-    # suspend hysteresis; no driver-torque override — only extreme angle (MADS-only) suspends
+    # Suspend hysteresis: extreme angle re-suspends; clean frames release after SUSPEND_HOLD_FRAMES.
     if self.suspended:
-      if handoff_clear:
-        self.below_release_count += 1
-        if self.below_release_count >= SUSPEND_HOLD_FRAMES:
-          self.suspended = False
-          self.below_release_count = 0
-      else:
+      self.below_release_count = self.below_release_count + 1 if handoff_clear else 0
+      if self.below_release_count >= SUSPEND_HOLD_FRAMES:
+        self.suspended = False
         self.below_release_count = 0
-    else:
-      if extreme_angle_mads_only:
-        self.suspended = True
-        self.below_release_count = 0
+    elif not handoff_clear:
+      self.suspended = True
+      self.below_release_count = 0
 
-    # latch engage: fresh needs clean handoff, continued rides active_last; disengage on latActive drop or suspend.
+    # Latch engage: fresh needs clean handoff, continued rides prior engage or active_last.
     raw_want = CC.latActive and not self.suspended
-    if raw_want and (self.active_last or pre_engage_ok):
-      self.engaged = True
-    if self.suspended or not CC.latActive:
-      self.engaged = False
+    self.engaged = raw_want and (self.engaged or self.active_last or pre_engage_ok)
     want_active = self.engaged
 
+    # Reset filter to measured on fresh engage so LKAS_Request rises from zero error.
     if want_active and not self.active_last:
       self.planner_angle_lpf.x = CS.out.steeringAngleDeg
 
     # Taper holds LKAS_Request briefly on clean disengage (EyeSight watchdog); bypassed when suspended.
     self.disengage_taper_remaining = DISENGAGE_TAPER_FRAMES if want_active else max(0, self.disengage_taper_remaining - 1)
 
-    # dash advertises intent (ES_LKAS_State); request is held back a lead so the dash reaches the EPS first.
+    # Dash leads request: ES_LKAS_State reaches EPS before LKAS_Request rises.
     dash_active = want_active or (self.disengage_taper_remaining > 0 and not self.suspended)
-
     self.dash_active_frames = min(self.dash_active_frames + 1, ENGAGE_DASH_LEAD_FRAMES) if dash_active else 0
-
     request_active = dash_active and (self.active_last or self.dash_active_frames >= ENGAGE_DASH_LEAD_FRAMES)
 
-    if request_active:
-      # Use the LPF state advanced by step_filter(); apply_std_steer_angle_limits enforces the hard rate cap.
-      # During taper, chase the live EPS angle for a smooth merge into the inactive path.
-      out_angle = self.planner_angle_lpf.x if want_active else CS.out.steeringAngleDeg
-    else:
-      out_angle = CS.out.steeringAngleDeg
+    # During taper (request still active but want_active down), chase live EPS for a smooth merge.
+    out_angle = self.planner_angle_lpf.x if (request_active and want_active) else CS.out.steeringAngleDeg
 
     self.dash_active = dash_active
     self.active_last = request_active
