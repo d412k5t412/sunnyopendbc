@@ -10,26 +10,26 @@ from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarController
 
 from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 
-# EPS rate guard for torque-controlled Subarus (Impreza/Forester); LKAS_ANGLE cars like the 2023 Outback skip this.
+# torque-path EPS rate guard (Impreza/Forester); unused on LKAS_ANGLE cars
 MAX_STEER_RATE = 25  # deg/s
-MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
+MAX_STEER_RATE_FRAMES = 7  # frames above rate before torque cut
 
-SUSPEND_HOLD_FRAMES = 25                 # ~0.5 s
-MADS_ONLY_MAX_STEER_ANGLE = 180          # deg
-PRE_ENGAGE_CLEAN_FRAMES = 5              # ~100 ms
-DISENGAGE_TAPER_FRAMES = 8               # ~160 ms; keeps LKAS_Request from edge-falling
-ENGAGE_DASH_LEAD_FRAMES = 8              # latched engage prevents stranded dash
+# LKAS_ANGLE state-machine timing (STEER_STEP = 20 ms per frame)
+SUSPEND_HOLD_FRAMES = 25  # clean frames before un-suspending, ~0.5 s
+MADS_ONLY_MAX_STEER_ANGLE = 180  # deg; extreme-angle guard in MADS-only mode
+PRE_ENGAGE_CLEAN_FRAMES = 5  # clean frames before a fresh engage, ~100 ms
+DISENGAGE_TAPER_FRAMES = 8  # LKAS_Request hold on clean disengage, ~160 ms (EyeSight watchdog)
+ENGAGE_DASH_LEAD_FRAMES = 8  # dash-active frames before LKAS_Request may rise, ~160 ms
 
-# Only smoothing in pipeline (MPC -> LPF -> panda rate limit); LPF ticks every 10 ms, CAN sends every 20 ms.
-PLANNER_ANGLE_LP_TAU      = ([5., 10., 20.], [0.3, 0.1, 0.0])      # m/s -> tau (s); smooths under 20 mph, identity above 45 mph
-# Physics safety cap: max lateral accel (3.6 = ISO 11270 3.0 + 6% road-bank tolerance; matches comma default).
-MAX_LATERAL_ACCEL         = 3.6    # m/s^2
-STEER_STIFFNESS_K         = 0.0015 # per (m/s)^2, tire-slip term in the bicycle model (matches VehicleModel default)
+# LPF in pipeline (MPC -> LPF -> panda rate limit); ticks every 10 ms, CAN sends every 20 ms
+PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.3, 0.1, 0.0])  # m/s -> tau (s); identity above 20 m/s
+MAX_LATERAL_ACCEL = 3.6  # m/s^2; ISO 11270 3.0 + 6% bank tolerance
+STEER_STIFFNESS_K = 0.0015  # per (m/s)^2; matches VehicleModel default
 
 class LkasAngleStateMachine:
-  def __init__(self, CP, angle_limits):
-    self.wheelbase = CP.wheelbase        # for MAX_LATERAL_ACCEL cap (bicycle model)
-    self.steer_ratio = CP.steerRatio     # static ratio; paramsd live SR is applied by MPC upstream
+  def __init__(self, CP):
+    self.wheelbase = CP.wheelbase  # for MAX_LATERAL_ACCEL cap
+    self.steer_ratio = CP.steerRatio  # static; paramsd live SR is applied by MPC upstream
     self.suspended = False
     self.below_release_count = 0
     self.pre_engage_clean_frames = 0
@@ -111,7 +111,7 @@ class CarController(CarControllerBase, SnGCarController):
     self.apply_torque_last = 0
     self.apply_angle_last = 0.0
     self.p = CarControllerParams(CP)
-    self.angle_sm = LkasAngleStateMachine(CP, self.p.ANGLE_LIMITS)
+    self.angle_sm = LkasAngleStateMachine(CP)
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
