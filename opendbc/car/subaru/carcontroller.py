@@ -69,6 +69,11 @@ class LkasAngleStateMachine:
         self.suspended = False
         self.below_release_count = 0
 
+    # wheel past 190° in MADS-only mode faults LKAS/EyeSight; force suspend so request + taper drop
+    if abs(CS.out.steeringAngleDeg) > 190 and not CC.enabled:
+      self.suspended = True
+      self.below_release_count = 0
+
     # Latch engage: fresh needs clean handoff, continued rides prior engage or active_last.
     raw_want = CC.latActive and not self.suspended
     self.engaged = raw_want and (self.engaged or self.active_last or pre_engage_ok)
