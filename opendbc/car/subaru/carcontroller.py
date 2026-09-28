@@ -14,12 +14,7 @@ from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # frames above rate before torque cut
 
-# LKAS_ANGLE state-machine timing (STEER_STEP = 20 ms per frame)
-SUSPEND_HOLD_FRAMES = 25  # clean frames before un-suspending, ~0.5 s
 MADS_ONLY_MAX_STEER_ANGLE = 180  # deg; extreme-angle guard in MADS-only mode
-PRE_ENGAGE_CLEAN_FRAMES = 5  # clean frames before a fresh engage, ~100 ms
-DISENGAGE_TAPER_FRAMES = 8  # LKAS_Request hold on clean disengage, ~160 ms (EyeSight watchdog)
-ENGAGE_DASH_LEAD_FRAMES = 8  # dash-active frames before LKAS_Request may rise, ~160 ms
 
 # LPF in pipeline (MPC -> LPF -> panda rate limit); ticks every 10 ms, CAN sends every 20 ms
 PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.3, 0.1, 0.0])  # m/s -> tau (s); identity above 20 m/s
@@ -61,8 +56,9 @@ class LkasAngleStateMachine:
     """State machine, called on STEER_STEP ticks. Returns (commanded_angle, active). Filter is advanced separately."""
     # Handoff gate: below MADS-only extreme-angle guard, or CC.enabled overrides it.
     handoff_clear = abs(CS.out.steeringAngleDeg) <= MADS_ONLY_MAX_STEER_ANGLE or CC.enabled
-    self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, PRE_ENGAGE_CLEAN_FRAMES) if handoff_clear else 0
-    pre_engage_ok = self.pre_engage_clean_frames >= PRE_ENGAGE_CLEAN_FRAMES
+    # require 5 clean frames (~100 ms) of clear handoff before a fresh engage
+    self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, 5) if handoff_clear else 0
+    pre_engage_ok = self.pre_engage_clean_frames >= 5
 
     # ACC drop suspends only when lateral itself ends; MADS keeps LKAS through a brake.
     if self.enabled_last and not CC.enabled and not CC.latActive:
@@ -70,10 +66,10 @@ class LkasAngleStateMachine:
       self.below_release_count = 0
     self.enabled_last = CC.enabled
 
-    # Suspend hysteresis: extreme angle re-suspends; clean frames release after SUSPEND_HOLD_FRAMES.
+    # Suspend hysteresis: extreme angle re-suspends; ~0.5 s of clean handoff releases.
     if self.suspended:
       self.below_release_count = self.below_release_count + 1 if handoff_clear else 0
-      if self.below_release_count >= SUSPEND_HOLD_FRAMES:
+      if self.below_release_count >= 25:  # ~0.5 s of clean handoff releases suspend
         self.suspended = False
         self.below_release_count = 0
     elif not handoff_clear:
@@ -89,13 +85,13 @@ class LkasAngleStateMachine:
     if want_active and not self.active_last:
       self.planner_angle_lpf.x = CS.out.steeringAngleDeg
 
-    # Taper holds LKAS_Request briefly on clean disengage (EyeSight watchdog); bypassed when suspended.
-    self.disengage_taper_remaining = DISENGAGE_TAPER_FRAMES if want_active else max(0, self.disengage_taper_remaining - 1)
+    # hold LKAS_Request 8 frames (~160 ms) on clean disengage to satisfy the EyeSight watchdog
+    self.disengage_taper_remaining = 8 if want_active else max(0, self.disengage_taper_remaining - 1)
 
-    # Dash leads request: ES_LKAS_State reaches EPS before LKAS_Request rises.
+    # dash leads request by 8 frames (~160 ms) so ES_LKAS_State reaches EPS before LKAS_Request rises
     dash_active = want_active or (self.disengage_taper_remaining > 0 and not self.suspended)
-    self.dash_active_frames = min(self.dash_active_frames + 1, ENGAGE_DASH_LEAD_FRAMES) if dash_active else 0
-    request_active = dash_active and (self.active_last or self.dash_active_frames >= ENGAGE_DASH_LEAD_FRAMES)
+    self.dash_active_frames = min(self.dash_active_frames + 1, 8) if dash_active else 0
+    request_active = dash_active and (self.active_last or self.dash_active_frames >= 8)
 
     # During taper (request still active but want_active down), chase live EPS for a smooth merge.
     out_angle = self.planner_angle_lpf.x if (request_active and want_active) else CS.out.steeringAngleDeg
