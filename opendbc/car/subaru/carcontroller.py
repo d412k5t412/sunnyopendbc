@@ -14,8 +14,6 @@ from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # frames above rate before torque cut
 
-MADS_ONLY_MAX_STEER_ANGLE = 180  # deg; extreme-angle guard in MADS-only mode
-
 # LPF in pipeline (MPC -> LPF -> panda rate limit); ticks every 10 ms, CAN sends every 20 ms
 PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.3, 0.1, 0.0])  # m/s -> tau (s); identity above 20 m/s
 MAX_LATERAL_ACCEL = 3.6  # m/s^2; ISO 11270 3.0 + 6% bank tolerance
@@ -54,27 +52,22 @@ class LkasAngleStateMachine:
 
   def update(self, CC, CS):
     """State machine, called on STEER_STEP ticks. Returns (commanded_angle, active). Filter is advanced separately."""
-    # Handoff gate: below MADS-only extreme-angle guard, or CC.enabled overrides it.
-    handoff_clear = abs(CS.out.steeringAngleDeg) <= MADS_ONLY_MAX_STEER_ANGLE or CC.enabled
-    # require 5 clean frames (~100 ms) of clear handoff before a fresh engage
-    self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, 5) if handoff_clear else 0
+    # require 5 frames (~100 ms) of settle before a fresh engage
+    self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, 5)
     pre_engage_ok = self.pre_engage_clean_frames >= 5
 
-    # ACC drop suspends only when lateral itself ends; MADS keeps LKAS through a brake.
+    # ACC drop suspends only when lateral itself ends; MADS keeps LKAS through a brake
     if self.enabled_last and not CC.enabled and not CC.latActive:
       self.suspended = True
       self.below_release_count = 0
     self.enabled_last = CC.enabled
 
-    # Suspend hysteresis: extreme angle re-suspends; ~0.5 s of clean handoff releases.
+    # release suspend after 25 frames (~0.5 s)
     if self.suspended:
-      self.below_release_count = self.below_release_count + 1 if handoff_clear else 0
-      if self.below_release_count >= 25:  # ~0.5 s of clean handoff releases suspend
+      self.below_release_count += 1
+      if self.below_release_count >= 25:
         self.suspended = False
         self.below_release_count = 0
-    elif not handoff_clear:
-      self.suspended = True
-      self.below_release_count = 0
 
     # Latch engage: fresh needs clean handoff, continued rides prior engage or active_last.
     raw_want = CC.latActive and not self.suspended
