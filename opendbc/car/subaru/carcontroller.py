@@ -124,11 +124,11 @@ class CarController(CarControllerBase, SnGCarController):
     return msg
 
   def handle_angle_lateral(self, CC, CS):
-    # sunnypilot: override / engage shaping + speed-scheduled LPF; `active` stays True during the disengage taper.
+    # driver override drops LKAS_Request; when inactive we snap to measured so re-arm starts at zero delta (panda rejects >N° mismatch)
     planner_angle, active = self.angle_sm.update(CC, CS)
-    apply_angle = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last,
-                                               CS.out.vEgoRaw, CS.out.steeringAngleDeg,
-                                               active, self.p.ANGLE_LIMITS)
+    active = active and not CS.out.steeringPressed
+    apply_angle = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last, CS.out.vEgoRaw,
+                                               CS.out.steeringAngleDeg, active, self.p.ANGLE_LIMITS) if active else CS.out.steeringAngleDeg
     self.apply_angle_last = apply_angle
     return subarucan.create_steering_control_angle(self.packer, apply_angle, active)
 
