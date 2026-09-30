@@ -25,7 +25,6 @@ class LkasAngleStateMachine:
     self.steer_ratio = CP.steerRatio  # static; paramsd live SR is applied by MPC upstream
     self.suspended = False
     self.below_release_count = 0
-    self.pre_engage_clean_frames = 0
     self.disengage_taper_remaining = 0
     self.active_last = False
     self.dash_active = False
@@ -52,10 +51,6 @@ class LkasAngleStateMachine:
 
   def update(self, CC, CS):
     """State machine, called on STEER_STEP ticks. Returns (commanded_angle, active). Filter is advanced separately."""
-    # require 5 frames (~100 ms) of settle before a fresh engage
-    self.pre_engage_clean_frames = min(self.pre_engage_clean_frames + 1, 5)
-    pre_engage_ok = self.pre_engage_clean_frames >= 5
-
     # ACC drop suspends only when lateral itself ends; MADS keeps LKAS through a brake
     if self.enabled_last and not CC.enabled and not CC.latActive:
       self.suspended = True
@@ -69,9 +64,7 @@ class LkasAngleStateMachine:
         self.suspended = False
         self.below_release_count = 0
 
-    # Latch engage: fresh needs clean handoff, continued rides prior engage or active_last.
-    raw_want = CC.latActive and not self.suspended
-    self.engaged = raw_want and (self.engaged or self.active_last or pre_engage_ok)
+    self.engaged = CC.latActive and not self.suspended
     want_active = self.engaged
 
     # Reset filter to measured on fresh engage so LKAS_Request rises from zero error.
