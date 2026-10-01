@@ -64,6 +64,11 @@ class LkasAngleStateMachine:
         self.suspended = False
         self.below_release_count = 0
 
+    # MADS-only extreme-angle guard: wheel past 190° without ACC faults the EPS on re-arm
+    if abs(CS.out.steeringAngleDeg) > 190 and not CC.enabled:
+      self.suspended = True
+      self.below_release_count = 0
+
     self.engaged = CC.latActive and not self.suspended
     want_active = self.engaged
 
@@ -124,11 +129,10 @@ class CarController(CarControllerBase, SnGCarController):
     return msg
 
   def handle_angle_lateral(self, CC, CS):
-    # driver override drops LKAS_Request; when inactive we snap to measured so re-arm starts at zero delta (panda rejects >N° mismatch)
     planner_angle, active = self.angle_sm.update(CC, CS)
-    active = active and not CS.out.steeringPressed
-    apply_angle = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last, CS.out.vEgoRaw,
-                                               CS.out.steeringAngleDeg, active, self.p.ANGLE_LIMITS) if active else CS.out.steeringAngleDeg
+    apply_angle = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last,
+                                               CS.out.vEgoRaw, CS.out.steeringAngleDeg,
+                                               active, self.p.ANGLE_LIMITS)
     self.apply_angle_last = apply_angle
     return subarucan.create_steering_control_angle(self.packer, apply_angle, active)
 
