@@ -90,8 +90,7 @@ class CarState(CarStateBase, MadsCarState, SnGCarState):
     cp_es_brake = cp_alt if self.CP.flags & SubaruFlags.GLOBAL_GEN2 else cp_cam
 
     if self.CP.flags & (SubaruFlags.HYBRID | SubaruFlags.LKAS_ANGLE):
-      # ES_DashStatus->Cruise_Activated_Dash is a dash-display signal; it falls during gas override and at standstill.
-      # LKAS_ANGLE uses ES_Status (falls cleanly on brake-to-stop); hybrids fall back to ES_Brake since ES_Status is missing.
+      # LKAS_ANGLE uses ES_Status.Cruise_Activated (clean fall on brake-to-stop); hybrids fall back to ES_Brake since ES_Status is missing.
       # TODO: validate hybrid path — ES_Status / ES_DashStatus->Signal7 are missing or always zero there; 0x27 and 0x225 may work.
       cruise_msg = "ES_Status" if self.CP.flags & SubaruFlags.LKAS_ANGLE else "ES_Brake"
       ret.cruiseState.available = cp_cam.vl["ES_DashStatus"]['Cruise_On'] != 0
