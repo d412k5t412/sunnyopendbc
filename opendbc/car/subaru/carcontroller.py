@@ -33,21 +33,15 @@ class LkasAngleStateMachine:
     self.enabled_last = False
     self.planner_angle_lpf = FirstOrderFilter(0.0, PLANNER_ANGLE_LP_TAU[1][0], DT_CTRL)
 
-  def _physics_capped_target(self, CC, CS):
-    # Clip MPC's request to what MAX_LATERAL_ACCEL allows at current speed (bicycle-model curvature -> wheel angle).
-    v = max(CS.out.vEgoRaw, 1.0)
-    max_angle = math.degrees((MAX_LATERAL_ACCEL / (v * v)) * self.wheelbase * self.steer_ratio * (1.0 + STEER_STIFFNESS_K * v * v))
-    return max(-max_angle, min(max_angle, CC.actuators.steeringAngleDeg))
-
   def step_filter(self, CC, CS):
-    """Advance the LPF every control tick (100 Hz), independent of STEER_STEP CAN cadence."""
+    # advance LPF at 100 Hz (independent of STEER_STEP); physics-cap target to MAX_LATERAL_ACCEL; update_alpha() takes tau
     if self.engaged:
-      # FirstOrderFilter.update_alpha() takes tau, despite the name.
+      v = max(CS.out.vEgoRaw, 1.0)
+      max_angle = math.degrees((MAX_LATERAL_ACCEL / (v * v)) * self.wheelbase * self.steer_ratio * (1.0 + STEER_STIFFNESS_K * v * v))
       self.planner_angle_lpf.update_alpha(float(np.interp(CS.out.vEgo, *PLANNER_ANGLE_LP_TAU)))
-      self.planner_angle_lpf.update(self._physics_capped_target(CC, CS))
+      self.planner_angle_lpf.update(max(-max_angle, min(max_angle, CC.actuators.steeringAngleDeg)))
     else:
-      # inactive: pin to measured so re-engage starts from where the wheel actually is.
-      self.planner_angle_lpf.x = CS.out.steeringAngleDeg
+      self.planner_angle_lpf.x = CS.out.steeringAngleDeg  # pin to measured so re-engage starts at zero error
 
   def update(self, CC, CS):
     """State machine, called on STEER_STEP ticks. Returns (commanded_angle, active). Filter is advanced separately."""
@@ -64,24 +58,19 @@ class LkasAngleStateMachine:
         self.below_release_count = 0
 
     self.engaged = CC.latActive and not self.suspended
-    want_active = self.engaged
 
-    # Reset filter to measured on fresh engage so LKAS_Request rises from zero error.
-    if want_active and not self.active_last:
+    # pin filter to measured until LKAS_Request can rise (zero error on first active command)
+    if self.engaged and not self.active_last:
       self.planner_angle_lpf.x = CS.out.steeringAngleDeg
 
-    # hold LKAS_Request 8 frames (~160 ms) on clean disengage to satisfy the EyeSight watchdog
-    self.disengage_taper_remaining = 8 if want_active else max(0, self.disengage_taper_remaining - 1)
+    # 8-frame disengage taper (EyeSight watchdog) and 8-frame dash lead so ES_LKAS_State precedes LKAS_Request
+    self.disengage_taper_remaining = 8 if self.engaged else max(0, self.disengage_taper_remaining - 1)
+    self.dash_active = self.engaged or (self.disengage_taper_remaining > 0 and not self.suspended)
+    self.dash_active_frames = min(self.dash_active_frames + 1, 8) if self.dash_active else 0
+    request_active = self.dash_active and (self.active_last or self.dash_active_frames >= 8)
 
-    # dash leads request by 8 frames (~160 ms) so ES_LKAS_State reaches EPS before LKAS_Request rises
-    dash_active = want_active or (self.disengage_taper_remaining > 0 and not self.suspended)
-    self.dash_active_frames = min(self.dash_active_frames + 1, 8) if dash_active else 0
-    request_active = dash_active and (self.active_last or self.dash_active_frames >= 8)
-
-    # During taper (request still active but want_active down), chase live EPS for a smooth merge.
-    out_angle = self.planner_angle_lpf.x if (request_active and want_active) else CS.out.steeringAngleDeg
-
-    self.dash_active = dash_active
+    # during taper, chase measured for a smooth merge back into the inactive path
+    out_angle = self.planner_angle_lpf.x if (request_active and self.engaged) else CS.out.steeringAngleDeg
     self.active_last = request_active
     return out_angle, request_active
 
@@ -124,11 +113,9 @@ class CarController(CarControllerBase, SnGCarController):
 
   def handle_angle_lateral(self, CC, CS):
     planner_angle, active = self.angle_sm.update(CC, CS)
-    apply_angle = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last,
-                                               CS.out.vEgoRaw, CS.out.steeringAngleDeg,
-                                               active, self.p.ANGLE_LIMITS)
-    self.apply_angle_last = apply_angle
-    return subarucan.create_steering_control_angle(self.packer, apply_angle, active)
+    self.apply_angle_last = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last, CS.out.vEgoRaw,
+                                                        CS.out.steeringAngleDeg, active, self.p.ANGLE_LIMITS)
+    return subarucan.create_steering_control_angle(self.packer, self.apply_angle_last, active)
 
   def update(self, CC, CC_SP, CS, now_nanos):
     actuators = CC.actuators
