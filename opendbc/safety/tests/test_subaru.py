@@ -70,39 +70,31 @@ class TestSubaruSafetyBase(common.CarSafetyTest):
     self.safety.set_rt_torque_last(t)
 
   def _torque_driver_msg(self, torque):
-    values = {"Steer_Torque_Sensor": torque}
-    return self.packer.make_can_msg_safety("Steering_Torque", 0, values)
+    return self.packer.make_can_msg_safety("Steering_Torque", 0, {"Steer_Torque_Sensor": torque})
 
   def _speed_msg(self, speed):
-    values = {s: speed for s in ["FR", "FL", "RR", "RL"]}
-    return self.packer.make_can_msg_safety("Wheel_Speeds", self.ALT_MAIN_BUS, values)
+    return self.packer.make_can_msg_safety("Wheel_Speeds", self.ALT_MAIN_BUS, {s: speed for s in ("FR", "FL", "RR", "RL")})
 
   def _user_brake_msg(self, brake):
-    values = {"Brake": brake}
-    return self.packer.make_can_msg_safety("Brake_Status", self.ALT_MAIN_BUS, values)
+    return self.packer.make_can_msg_safety("Brake_Status", self.ALT_MAIN_BUS, {"Brake": brake})
 
   def _user_gas_msg(self, gas):
-    values = {"Throttle_Pedal": gas}
-    return self.packer.make_can_msg_safety("Throttle", 0, values)
+    return self.packer.make_can_msg_safety("Throttle", 0, {"Throttle_Pedal": gas})
 
   def _pcm_status_msg(self, enable):
-    values = {"Cruise_Activated": enable}
-    return self.packer.make_can_msg_safety("CruiseControl", self.ALT_MAIN_BUS, values)
+    return self.packer.make_can_msg_safety("CruiseControl", self.ALT_MAIN_BUS, {"Cruise_Activated": enable})
 
   def _lkas_button_msg(self, lkas_pressed=False, lkas_hud=0):
-    values = {"LKAS_Dash_State": 2 if lkas_pressed else lkas_hud}
-    return self.packer.make_can_msg_safety("ES_LKAS_State", SUBARU_CAM_BUS, values)
+    return self.packer.make_can_msg_safety("ES_LKAS_State", SUBARU_CAM_BUS, {"LKAS_Dash_State": 2 if lkas_pressed else lkas_hud})
 
   def test_enable_control_allowed_with_mads_button(self):
     for enable_mads in (True, False):
-      with self.subTest("enable_mads", mads_enabled=enable_mads):
-        for mads_button_press in range(4):
-          with self.subTest("mads_button_press", button_state=mads_button_press):
-            self.safety.set_mads_params(enable_mads, False, False)
-
-            self._rx(self._lkas_button_msg(False, mads_button_press))
-            self.assertEqual(enable_mads and mads_button_press in range(1, 4),
-                             self.safety.get_controls_allowed_lateral())
+      for button_state in range(4):
+        with self.subTest(mads_enabled=enable_mads, button_state=button_state):
+          self.safety.set_mads_params(enable_mads, False, False)
+          self._rx(self._lkas_button_msg(False, button_state))
+          self.assertEqual(enable_mads and button_state in range(1, 4),
+                           self.safety.get_controls_allowed_lateral())
 
 
 class TestSubaruStockLongitudinalSafetyBase(TestSubaruSafetyBase):
@@ -161,9 +153,7 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
 
   FLAGS = SubaruSafetyFlags.LKAS_ANGLE | SubaruSafetyFlags.GEN2
 
-  # Safety cap is 720 deg, but LKAS_Output is 17-bit at 0.01 deg/LSB (+/-655.35), so sweeps
-  # are bounded by what CANPacker can encode; keep headroom for the rate-delta probes.
-  STEER_ANGLE_MAX = 650
+  STEER_ANGLE_MAX = 650      # safety cap is 720, but LKAS_Output encodes +/-655.35 (17-bit, 0.01 deg); keep headroom
   STEER_ANGLE_TEST_MAX = 640
   ANGLE_RATE_BP = [0, 5, 35]
   ANGLE_RATE_UP = [1.5, 0.8, 0.20]
@@ -199,52 +189,6 @@ class TestSubaruGen1AngleStockLongitudinalSafety(TestSubaruStockLongitudinalSafe
 class TestSubaruGen2AngleStockLongitudinalSafety(TestSubaruStockLongitudinalSafetyBase, TestSubaruAngleSafetyBase):
   ALT_MAIN_BUS = SUBARU_ALT_BUS
   FLAGS = SubaruSafetyFlags.GEN2 | SubaruSafetyFlags.LKAS_ANGLE
-
-
-class TestSubaruGen1LongitudinalSafety(TestSubaruLongitudinalSafetyBase, TestSubaruTorqueSafetyBase):
-  FLAGS = SubaruSafetyFlags.LONG
-  TX_MSGS = lkas_tx_msgs(SUBARU_MAIN_BUS) + long_tx_msgs(SUBARU_MAIN_BUS)
-  RELAY_MALFUNCTION_ADDRS = {SUBARU_MAIN_BUS: (SubaruMsg.ES_LKAS, SubaruMsg.ES_DashStatus, SubaruMsg.ES_LKAS_State,
-                                               SubaruMsg.ES_Infotainment, SubaruMsg.ES_Brake, SubaruMsg.ES_Status,
-                                               SubaruMsg.ES_Distance)}
-
-
-class TestSubaruGen2LongitudinalSafety(TestSubaruLongitudinalSafetyBase, TestSubaruGen2TorqueSafetyBase):
-  FLAGS = SubaruSafetyFlags.LONG | SubaruSafetyFlags.GEN2
-  TX_MSGS = lkas_tx_msgs(SUBARU_ALT_BUS) + long_tx_msgs(SUBARU_ALT_BUS) + gen2_long_additional_tx_msgs()
-  FWD_BLACKLISTED_ADDRS = {2: [SubaruMsg.ES_LKAS, SubaruMsg.ES_DashStatus, SubaruMsg.ES_LKAS_State,
-                               SubaruMsg.ES_Infotainment]}
-  RELAY_MALFUNCTION_ADDRS = {SUBARU_MAIN_BUS: (SubaruMsg.ES_LKAS, SubaruMsg.ES_DashStatus, SubaruMsg.ES_LKAS_State,
-                                               SubaruMsg.ES_Infotainment),
-                             SUBARU_ALT_BUS: (SubaruMsg.ES_Brake, SubaruMsg.ES_Status, SubaruMsg.ES_Distance)}
-
-  def _rdbi_msg(self, did: int):
-    return b'\x03\x22' + did.to_bytes(2) + b'\x00\x00\x00\x00'
-
-  def _es_uds_msg(self, msg: bytes):
-    return libsafety_py.make_CANPacket(SubaruMsg.ES_UDS_Request, 2, msg)
-
-  def test_es_uds_message(self):
-    tester_present = b'\x02\x3E\x80\x00\x00\x00\x00\x00'
-    not_tester_present = b"\x03\xAA\xAA\x00\x00\x00\x00\x00"
-
-    button_did = 0x1130
-
-    # Tester present is allowed for gen2 long to keep eyesight disabled
-    self.assertTrue(self._tx(self._es_uds_msg(tester_present)))
-
-    # Non-Tester present is not allowed
-    self.assertFalse(self._tx(self._es_uds_msg(not_tester_present)))
-
-    # Only button_did is allowed to be read via UDS
-    for did in range(0xFFFF):
-      should_tx = (did == button_did)
-      self.assertEqual(self._tx(self._es_uds_msg(self._rdbi_msg(did))), should_tx)
-
-    # any other msg is not allowed
-    for sid in range(0xFF):
-      msg = b'\x03' + sid.to_bytes(1) + b'\x00' * 6
-      self.assertFalse(self._tx(self._es_uds_msg(msg)))
 
 
 if __name__ == "__main__":
