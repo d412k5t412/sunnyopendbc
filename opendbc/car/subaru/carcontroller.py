@@ -51,23 +51,17 @@ class LkasAngleStateMachine:
 
   def update(self, CC, CS):
     """State machine, called on STEER_STEP ticks. Returns (commanded_angle, active). Filter is advanced separately."""
-    # ACC drop suspends only when lateral itself ends; MADS keeps LKAS through a brake
-    if self.enabled_last and not CC.enabled and not CC.latActive:
+    # suspend LKAS (held 25 frames ~0.5s) on ACC drop or MADS-only extreme angle — both would fault EPS on re-arm
+    if not CC.enabled and ((self.enabled_last and not CC.latActive) or abs(CS.out.steeringAngleDeg) > 190):
       self.suspended = True
       self.below_release_count = 0
     self.enabled_last = CC.enabled
 
-    # release suspend after 25 frames (~0.5 s)
     if self.suspended:
       self.below_release_count += 1
       if self.below_release_count >= 25:
         self.suspended = False
         self.below_release_count = 0
-
-    # MADS-only extreme-angle guard: wheel past 190° without ACC faults the EPS on re-arm
-    if abs(CS.out.steeringAngleDeg) > 190 and not CC.enabled:
-      self.suspended = True
-      self.below_release_count = 0
 
     self.engaged = CC.latActive and not self.suspended
     want_active = self.engaged
