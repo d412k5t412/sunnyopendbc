@@ -17,9 +17,7 @@ ButtonType = structs.CarState.ButtonEvent.Type
 LKAS_DASH_STATE_ACTIVE_MIN = 1
 LKAS_DASH_STATE_ACTIVE_MAX = 3
 
-# LKAS_Dash_State momentarily flickers between values during stock LKAS state transitions
-# (e.g. brief reads of 0 or 4 between 2->1). Debounce for 3 frames before propagating.
-LKAS_DASH_STATE_DEBOUNCE_FRAMES = 3
+LKAS_DASH_STATE_DEBOUNCE_FRAMES = 3  # debounce stock LKAS transitions (e.g. flicker between 0/4 during 2->1)
 
 
 class MadsCarState(MadsCarStateBase):
@@ -30,22 +28,12 @@ class MadsCarState(MadsCarStateBase):
 
   @staticmethod
   def create_lkas_button_events(cur_btn: int, prev_btn: int) -> list[structs.CarState.ButtonEvent]:
-    events: list[structs.CarState.ButtonEvent] = []
-
-    if cur_btn == prev_btn:
-      return events
-
-    # Edge on entering or leaving the "active" range
-    prev_active = LKAS_DASH_STATE_ACTIVE_MIN <= prev_btn <= LKAS_DASH_STATE_ACTIVE_MAX
+    # single lkas event on entering/leaving the active range
     cur_active = LKAS_DASH_STATE_ACTIVE_MIN <= cur_btn <= LKAS_DASH_STATE_ACTIVE_MAX
-
-    if prev_active != cur_active:
-      events.append(structs.CarState.ButtonEvent(
-        pressed=True,
-        type=ButtonType.lkas,
-      ))
-
-    return events
+    prev_active = LKAS_DASH_STATE_ACTIVE_MIN <= prev_btn <= LKAS_DASH_STATE_ACTIVE_MAX
+    if cur_active == prev_active:
+      return []
+    return [structs.CarState.ButtonEvent(pressed=True, type=ButtonType.lkas)]
 
   def update_mads(self, ret: structs.CarState, can_parsers: dict[StrEnum, CANParser]) -> None:
     cp_cam = can_parsers[Bus.cam]
@@ -54,14 +42,10 @@ class MadsCarState(MadsCarStateBase):
     if not self.CP.flags & SubaruFlags.PREGLOBAL:
       raw_btn = int(cp_cam.vl["ES_LKAS_State"]["LKAS_Dash_State"])
 
-      if raw_btn != self._lkas_button_stable:
-        self._lkas_button_debounce += 1
-        if self._lkas_button_debounce >= LKAS_DASH_STATE_DEBOUNCE_FRAMES:
-          self._lkas_button_stable = raw_btn
-          self._lkas_button_debounce = 0
-      else:
+      self._lkas_button_debounce = self._lkas_button_debounce + 1 if raw_btn != self._lkas_button_stable else 0
+      if self._lkas_button_debounce >= LKAS_DASH_STATE_DEBOUNCE_FRAMES:
+        self._lkas_button_stable = raw_btn
         self._lkas_button_debounce = 0
-
       self.lkas_button = self._lkas_button_stable
 
     ret.buttonEvents = self.create_lkas_button_events(self.lkas_button, self.prev_lkas_button)
