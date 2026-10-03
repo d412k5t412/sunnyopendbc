@@ -14,35 +14,36 @@ from opendbc.can.parser import CANParser
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
+LKAS_DASH_STATE_ACTIVE_MIN = 1
+LKAS_DASH_STATE_ACTIVE_MAX = 3
+LKAS_DASH_STATE_DEBOUNCE_FRAMES = 3  # debounce stock LKAS transitions (e.g. flicker between 0/4 during 2->1)
 
 class MadsCarState(MadsCarStateBase):
   def __init__(self, CP: structs.CarParams, CP_SP: structs.CarParamsSP):
     super().__init__(CP, CP_SP)
+    self._lkas_button_debounce = 0   # frames the raw value has differed from stable
+    self._lkas_button_stable = 0     # last debounce-accepted LKAS_Dash_State value
 
   @staticmethod
-  def create_lkas_button_events(cur_btn: int, prev_btn: int,
-                                buttons_dict: dict[int, structs.CarState.ButtonEvent.Type]) -> list[structs.CarState.ButtonEvent]:
-    events: list[structs.CarState.ButtonEvent] = []
-
-    if cur_btn == prev_btn:
-      return events
-
-    state_changes = [
-      {"pressed": prev_btn != cur_btn and cur_btn != 2 and not (prev_btn == 2 and cur_btn == 1)},
-      {"pressed": prev_btn != cur_btn and cur_btn == 2 and cur_btn != 1},
-    ]
-
-    for change in state_changes:
-      if change["pressed"]:
-        events.append(structs.CarState.ButtonEvent(pressed=change["pressed"],
-                                                   type=buttons_dict.get(cur_btn, ButtonType.unknown)))
-    return events
+  def create_lkas_button_events(cur_btn: int, prev_btn: int) -> list[structs.CarState.ButtonEvent]:
+    # single lkas event on entering/leaving the active range
+    cur_active = LKAS_DASH_STATE_ACTIVE_MIN <= cur_btn <= LKAS_DASH_STATE_ACTIVE_MAX
+    prev_active = LKAS_DASH_STATE_ACTIVE_MIN <= prev_btn <= LKAS_DASH_STATE_ACTIVE_MAX
+    if cur_active == prev_active:
+      return []
+    return [structs.CarState.ButtonEvent(pressed=True, type=ButtonType.lkas)]
 
   def update_mads(self, ret: structs.CarState, can_parsers: dict[StrEnum, CANParser]) -> None:
     cp_cam = can_parsers[Bus.cam]
 
     self.prev_lkas_button = self.lkas_button
     if not self.CP.flags & SubaruFlags.PREGLOBAL:
-      self.lkas_button = cp_cam.vl["ES_LKAS_State"]["LKAS_Dash_State"]
+      raw_btn = int(cp_cam.vl["ES_LKAS_State"]["LKAS_Dash_State"])
 
-    ret.buttonEvents = self.create_lkas_button_events(self.lkas_button, self.prev_lkas_button, {1: ButtonType.lkas})
+      self._lkas_button_debounce = self._lkas_button_debounce + 1 if raw_btn != self._lkas_button_stable else 0
+      if self._lkas_button_debounce >= LKAS_DASH_STATE_DEBOUNCE_FRAMES:
+        self._lkas_button_stable = raw_btn
+        self._lkas_button_debounce = 0
+      self.lkas_button = self._lkas_button_stable
+
+    ret.buttonEvents = self.create_lkas_button_events(self.lkas_button, self.prev_lkas_button)
