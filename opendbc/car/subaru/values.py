@@ -202,7 +202,7 @@ class CAR(Platforms):
   )
   SUBARU_OUTBACK_2023 = SubaruGen2PlatformConfig(
     [SubaruCarDocs("Subaru Outback 2023", "All", car_parts=CarParts.common([CarHarness.subaru_d]))],
-    SUBARU_OUTBACK.specs,
+    CarSpecs(mass=1568, wheelbase=2.75, steerRatio=13.5),
     flags=SubaruFlags.LKAS_ANGLE,
   )
   SUBARU_ASCENT_2023 = SubaruGen2PlatformConfig(
