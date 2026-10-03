@@ -18,7 +18,7 @@ class CarState(CarStateBase, MadsCarState, SnGCarState):
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     self.shifter_values = can_define.dv["Transmission"]["Gear"]
 
-    self.angle_rate_calulator = CanSignalRateCalculator(50)
+    self.angle_rate_calculator = CanSignalRateCalculator(50)
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
@@ -78,7 +78,7 @@ class CarState(CarStateBase, MadsCarState, SnGCarState):
 
     if not (self.CP.flags & SubaruFlags.PREGLOBAL):
       # ideally we get this from the car, but unclear if it exists. diagnostic software doesn't even have it
-      ret.steeringRateDeg = self.angle_rate_calulator.update(ret.steeringAngleDeg, steering_updated)
+      ret.steeringRateDeg = self.angle_rate_calculator.update(ret.steeringAngleDeg, steering_updated)
 
     ret.steeringTorque = cp.vl["Steering_Torque"]["Steer_Torque_Sensor"]
     ret.steeringTorqueEps = cp.vl["Steering_Torque"]["Steer_Torque_Output"]
