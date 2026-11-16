@@ -32,6 +32,7 @@
 #define MSG_SUBARU_ES_LKAS_ANGLE         0x124U
 #define MSG_SUBARU_ES_Brake              0x220U
 #define MSG_SUBARU_ES_Distance           0x221U
+#define MSG_SUBARU_ES_Status             0x222U
 #define MSG_SUBARU_ES_DashStatus         0x321U
 #define MSG_SUBARU_ES_LKAS_State         0x322U
 #define MSG_SUBARU_ES_Infotainment       0x323U
@@ -61,14 +62,14 @@
   {.msg = {{MSG_SUBARU_CruiseControl,   alt_bus,         8, 20U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
   {.msg = {{MSG_SUBARU_ES_LKAS_State,   SUBARU_CAM_BUS,  8, 10U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
 
-// LKAS_ANGLE: ACC engagement via ES_Brake/ES_DashStatus (not CruiseControl); needs Steering_2 for angle.
+// LKAS_ANGLE: ACC engagement via ES_Status/ES_DashStatus (not CruiseControl); needs Steering_2 for angle.
 #define SUBARU_LKAS_ANGLE_RX_CHECKS(alt_main_bus, es_brake_bus)                                                                       \
   {.msg = {{MSG_SUBARU_Throttle,        SUBARU_MAIN_BUS, 8, 100U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
   {.msg = {{MSG_SUBARU_Steering_Torque, SUBARU_MAIN_BUS, 8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
   {.msg = {{MSG_SUBARU_Steering_2,      SUBARU_MAIN_BUS, 8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
   {.msg = {{MSG_SUBARU_Wheel_Speeds,    alt_main_bus,    8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
   {.msg = {{MSG_SUBARU_Brake_Status,    alt_main_bus,    8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
-  {.msg = {{MSG_SUBARU_ES_Brake,        es_brake_bus,    8, 50U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
+  {.msg = {{MSG_SUBARU_ES_Status,       es_brake_bus,    8, 20U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
   {.msg = {{MSG_SUBARU_ES_DashStatus,   SUBARU_CAM_BUS,  8, 10U,  .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},   \
 
 static bool subaru_gen2 = false;
@@ -118,10 +119,10 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     mads_button_press = ((lkas_hud >= 1) && (lkas_hud <= 3)) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
   }
 
-  // ACC engagement: torque cars use CruiseControl; LKAS_ANGLE uses ES_Brake (engaged) + ES_DashStatus (main).
+  // ACC engagement: torque cars use CruiseControl; LKAS_ANGLE uses ES_Status (engaged, matches carstate) + ES_DashStatus (main).
   if (subaru_lkas_angle) {
-    if ((msg->addr == MSG_SUBARU_ES_Brake) && (msg->bus == es_brake_bus)) {
-      bool cruise_engaged = (msg->data[4] >> 7) & 1U;
+    if ((msg->addr == MSG_SUBARU_ES_Status) && (msg->bus == es_brake_bus)) {
+      bool cruise_engaged = GET_BIT(msg, 29U);
       pcm_cruise_check(cruise_engaged);
     }
     if ((msg->addr == MSG_SUBARU_ES_DashStatus) && (msg->bus == SUBARU_CAM_BUS)) {
@@ -161,19 +162,19 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits SUBARU_STEERING_LIMITS      = SUBARU_STEERING_LIMITS_GENERATOR(2047, 50, 70);
   const TorqueSteeringLimits SUBARU_GEN2_STEERING_LIMITS = SUBARU_STEERING_LIMITS_GENERATOR(1500, 35, 50);
 
-  // 3-point envelope >= controller's 5-point ANGLE_LIMITS (cross-checked at 0/0.5/2/10/20 m/s).
   // max_angle 720 deg passes driver-side full-lock without rejection cascading to an EyeSight fault.
   const AngleSteeringLimits SUBARU_ANGLE_STEERING_LIMITS = {
     .max_angle = 720 * 100,
     .angle_deg_to_can = 100.,
-    .angle_rate_up_lookup = {
-      {0., 5., 35.},
-      {1.5, 0.8, 0.20},
-    },
-    .angle_rate_down_lookup = {
-      {0., 5., 35.},
-      {2.0, 1.2, 0.25},      // looser than UP: unwinding toward center is self-stabilizing and curve exits need high rates
-    },
+    .frequency = 50U,
+  };
+
+  // lateral accel/jerk limits from a vehicle model; lowest steer ratio of the angle LKAS cars (Crosstrek 2024+)
+  // must match get_safety_CP() in carcontroller.py
+  const AngleSteeringParams SUBARU_STEERING_PARAMS = {
+    .slip_factor = -0.0006281955319491566,  // calc_slip_factor(VM)
+    .steer_ratio = 13.0,
+    .wheelbase = 2.67,
   };
 
   const LongitudinalLimits SUBARU_LONG_LIMITS = {
@@ -206,7 +207,7 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
     desired_angle = -1 * to_signed(desired_angle, 17);
     bool lkas_request = GET_BIT(msg, 12U);
 
-    violation |= steer_angle_cmd_checks(desired_angle, lkas_request, SUBARU_ANGLE_STEERING_LIMITS);
+    violation |= steer_angle_cmd_checks_vm(desired_angle, lkas_request, SUBARU_ANGLE_STEERING_LIMITS, SUBARU_STEERING_PARAMS);
   }
 
   // check es_brake brake_pressure limits

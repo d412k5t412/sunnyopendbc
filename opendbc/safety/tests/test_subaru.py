@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 import enum
 import unittest
+import numpy as np
 
-from opendbc.car.subaru.values import SubaruSafetyFlags
+from opendbc.car.lateral import get_max_angle_delta_vm, get_max_angle_vm
+from opendbc.car.subaru.carcontroller import get_safety_CP
+from opendbc.car.subaru.values import CarControllerParams, SubaruSafetyFlags
 from opendbc.car.structs import CarParams
+from opendbc.car.vehicle_model import VehicleModel
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
 from opendbc.safety.tests.common import CANPackerSafety
@@ -162,13 +166,21 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
   FLAGS = SubaruSafetyFlags.LKAS_ANGLE | SubaruSafetyFlags.GEN2
 
   STEER_ANGLE_MAX = 650      # safety cap is 720, but LKAS_Output encodes +/-655.35 (17-bit, 0.01 deg); keep headroom
-  STEER_ANGLE_TEST_MAX = 640
-  ANGLE_RATE_BP = [0, 5, 35]
-  ANGLE_RATE_UP = [1.5, 0.8, 0.20]
-  ANGLE_RATE_DOWN = [2.0, 1.2, 0.25]
 
-  def _angle_cmd_msg(self, angle, enabled=1):
+  LATERAL_FREQUENCY = 50
+
+  def setUp(self):
+    self.cnt_angle_cmd = 0
+    super().setUp()
+    cp = get_safety_CP()
+    self.VM = VehicleModel(cp)
+    self.limits = CarControllerParams(cp)
+
+  def _angle_cmd_msg(self, angle, enabled=1, increment_timer=True):
     values = {"LKAS_Output": angle, "LKAS_Request": enabled, "SET_3": 3}
+    if increment_timer:
+      self.safety.set_timer(self.cnt_angle_cmd * int(1e6 / self.LATERAL_FREQUENCY))
+      self.cnt_angle_cmd += 1
     return self.packer.make_can_msg_safety("ES_LKAS_ANGLE", SUBARU_MAIN_BUS, values)
 
   def _angle_meas_msg(self, angle):
@@ -181,9 +193,36 @@ class TestSubaruAngleSafetyBase(TestSubaruSafetyBase, common.AngleSteeringSafety
     return self.packer.make_can_msg_safety("Wheel_Speeds", self.ALT_MAIN_BUS, values)
 
   def _pcm_status_msg(self, enable):
-    # LKAS_ANGLE cars source the engage bit from ES_Brake, not CruiseControl
+    # LKAS_ANGLE cars source the engage bit from ES_Status (same as carstate), not CruiseControl or ES_Brake
     values = {"Cruise_Activated": enable}
-    return self.packer.make_can_msg_safety("ES_Brake", self.ALT_CAM_BUS, values)
+    return self.packer.make_can_msg_safety("ES_Status", self.ALT_CAM_BUS, values)
+
+  def test_es_brake_does_not_engage(self):
+    # ES_Brake.Cruise_Activated can stay high while braking at a stop; it must not set controls_allowed
+    self.safety.set_controls_allowed(False)
+    self._rx(self.packer.make_can_msg_safety("ES_Brake", self.ALT_CAM_BUS, {"Cruise_Activated": 0}))
+    self._rx(self.packer.make_can_msg_safety("ES_Brake", self.ALT_CAM_BUS, {"Cruise_Activated": 1}))
+    self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_angle_cmd_when_enabled(self):
+    # lateral accel and jerk limits from the vehicle model, bracketed either side of the limit
+    for speed in np.linspace(0, 50, 101):
+      self._reset_speed_measurement(speed)
+      # use the decoded wheel speed, including the 1 m/s safety tolerance
+      limit_speed = max(self.safety.get_vehicle_speed_min() - 1, 1)
+      for sign in (-1, 1):
+        for jerk in (False, True):
+          get_limit = get_max_angle_delta_vm if jerk else get_max_angle_vm
+          limit = get_limit(limit_speed, self.VM, self.limits)
+          # bracket the limit, allowing for C float rounding and the 1 CAN unit tolerance
+          for offset, allowed in ((-1, True), (2, False)):
+            angle_can = int(limit * self.DEG_TO_CAN) + offset
+            if angle_can > self.STEER_ANGLE_MAX * self.DEG_TO_CAN:
+              continue
+            with self.subTest(speed=speed, sign=sign, jerk=jerk, offset=offset):
+              self.safety.set_controls_allowed(True)
+              self.safety.set_desired_angle_last(0 if jerk else angle_can * sign)
+              self.assertEqual(allowed, self._tx(self._angle_cmd_msg(angle_can / self.DEG_TO_CAN * sign, True)))
 
 
 class TestSubaruGen1AngleStockLongitudinalSafety(TestSubaruStockLongitudinalSafetyBase, TestSubaruAngleSafetyBase):

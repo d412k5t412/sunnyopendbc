@@ -1,12 +1,12 @@
-import math
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, make_tester_present_msg
 from opendbc.car.common.filter_simple import FirstOrderFilter
-from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance
+from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_angle_limits_vm, common_fault_avoidance, get_max_angle_vm
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.subaru import subarucan
-from opendbc.car.subaru.values import DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
+from opendbc.car.subaru.values import CAR, DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
+from opendbc.car.vehicle_model import VehicleModel
 
 from opendbc.sunnypilot.car.subaru.stop_and_go import SnGCarController
 
@@ -18,12 +18,22 @@ MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.15, 0.05, 0.0])  # m/s -> tau (s); identity above 20 m/s
 LOW_SPEED_CALM_TAU = ([1.5, 3.5, 5.], [2.0, 1.0, 0.15])
 LOW_SPEED_CALM_BAND = (5., 20.)
-MAX_LATERAL_ACCEL = 3.6  # m/s^2; ISO 11270 3.0 + 6% bank tolerance
-STEER_STIFFNESS_K = 0.0015  # per (m/s)^2; matches VehicleModel default
+LKAS_MAX_CMD_ANGLE = 430.  # deg; never command beyond this
+LKAS_SUSPEND_ANGLE = 450.  # deg; drop LKAS_Request while the wheel is beyond this (EPS follows to 450 with no faults)
+
+
+def get_safety_CP():
+  # match panda safety: Crosstrek 2024+ steer ratio (13.0), the lowest of the angle LKAS cars
+  # Forester 2022 has the same wheelbase and mass as the Crosstrek
+  from opendbc.car.subaru.interface import CarInterface
+  CP = CarInterface.get_non_essential_params(CAR.SUBARU_FORESTER_2022)
+  CP.steerRatio = 13.0
+  return CP
+
 
 class LkasAngleStateMachine:
-  def __init__(self, CP):
-    self._lat_accel_coeff = MAX_LATERAL_ACCEL * CP.wheelbase * CP.steerRatio  # physics-cap constant, precomputed
+  def __init__(self):
+    self.max_angle = LKAS_MAX_CMD_ANGLE
     self.suspended = False
     self.below_release_count = 0
     self.disengage_taper_remaining = 0
@@ -35,12 +45,11 @@ class LkasAngleStateMachine:
     self.latActive_last = False
     self.planner_angle_lpf = FirstOrderFilter(0.0, PLANNER_ANGLE_LP_TAU[1][0], DT_CTRL)
 
-  def step_filter(self, CC, CS):
-    # advance LPF at 100 Hz (independent of STEER_STEP); physics-cap target to MAX_LATERAL_ACCEL; update_alpha() takes tau
+  def step_filter(self, CC, CS, max_angle):
+    # advance LPF at 100 Hz (independent of STEER_STEP); cap target to the safety lateral-accel angle; update_alpha() takes tau
+    self.max_angle = min(max_angle, LKAS_MAX_CMD_ANGLE)
     if self.engaged:
-      v = max(CS.out.vEgo, 1.0)
-      max_angle = math.degrees(self._lat_accel_coeff * (1.0 + STEER_STIFFNESS_K * v * v) / (v * v))
-      target = max(-max_angle, min(max_angle, CC.actuators.steeringAngleDeg))
+      target = max(-self.max_angle, min(self.max_angle, CC.actuators.steeringAngleDeg))
       tau = float(np.interp(CS.out.vEgo, *PLANNER_ANGLE_LP_TAU))
       calm_tau = float(np.interp(CS.out.vEgo, *LOW_SPEED_CALM_TAU))
       if calm_tau > tau:
@@ -61,7 +70,8 @@ class LkasAngleStateMachine:
 
     # suspend LKAS (held 25 frames ~0.5s) on edge of (ACC or lat) → off, or MADS-only extreme angle — EPS faults on re-arm otherwise
     edge_off = (self.enabled_last or self.latActive_last) and not CC.latActive
-    if not CC.enabled and (edge_off or abs(CS.out.steeringAngleDeg) > 190):
+    angle_abs = abs(CS.out.steeringAngleDeg)
+    if angle_abs > LKAS_SUSPEND_ANGLE or (not CC.enabled and (edge_off or angle_abs > 190)):
       self.suspended = True
       self.below_release_count = 0
     self.enabled_last = CC.enabled
@@ -73,7 +83,8 @@ class LkasAngleStateMachine:
         self.suspended = False
         self.below_release_count = 0
 
-    self.engaged = CC.latActive and not self.suspended
+    # fresh engage only inside the safety angle limit: panda blocks a first frame beyond it and the EPS faults on the gap
+    self.engaged = CC.latActive and not self.suspended and (self.engaged or angle_abs <= self.max_angle)
 
     # pin filter to measured until LKAS_Request can rise (zero error on first active command)
     if self.engaged and not self.active_last:
@@ -97,7 +108,9 @@ class CarController(CarControllerBase, SnGCarController):
     self.apply_torque_last = 0
     self.apply_angle_last = 0.0
     self.p = CarControllerParams(CP)
-    self.angle_sm = LkasAngleStateMachine(CP)
+    self.angle_sm = LkasAngleStateMachine()
+    if CP.flags & SubaruFlags.LKAS_ANGLE:
+      self.VM = VehicleModel(get_safety_CP())
 
     self.cruise_button_prev = 0
     self.steer_rate_counter = 0
@@ -129,8 +142,8 @@ class CarController(CarControllerBase, SnGCarController):
 
   def handle_angle_lateral(self, CC, CS):
     planner_angle, active = self.angle_sm.update(CC, CS)
-    self.apply_angle_last = apply_std_steer_angle_limits(planner_angle, self.apply_angle_last, CS.out.vEgoRaw,
-                                                        CS.out.steeringAngleDeg, active, self.p.ANGLE_LIMITS)
+    self.apply_angle_last = apply_steer_angle_limits_vm(planner_angle, self.apply_angle_last, CS.out.vEgoRaw,
+                                                       CS.out.steeringAngleDeg, active, self.p, self.VM)
     return subarucan.create_steering_control_angle(self.packer, self.apply_angle_last, active)
 
   def update(self, CC, CC_SP, CS, now_nanos):
@@ -143,7 +156,7 @@ class CarController(CarControllerBase, SnGCarController):
     # *** steering ***
     if self.CP.flags & SubaruFlags.LKAS_ANGLE:
       # Advance the LPF at the full 100 Hz control rate so its dynamics don't depend on STEER_STEP.
-      self.angle_sm.step_filter(CC, CS)
+      self.angle_sm.step_filter(CC, CS, get_max_angle_vm(max(CS.out.vEgoRaw, 1), self.VM, self.p))
     if (self.frame % self.p.STEER_STEP) == 0:
       if self.CP.flags & SubaruFlags.LKAS_ANGLE:
         can_sends.append(self.handle_angle_lateral(CC, CS))
