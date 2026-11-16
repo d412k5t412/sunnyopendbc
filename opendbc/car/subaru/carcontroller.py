@@ -15,7 +15,9 @@ MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
 # LPF in pipeline (MPC -> LPF -> panda rate limit); ticks every 10 ms, CAN sends every 20 ms
-PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.3, 0.1, 0.0])  # m/s -> tau (s); identity above 20 m/s
+PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.15, 0.05, 0.0])  # m/s -> tau (s); identity above 20 m/s
+LOW_SPEED_CALM_TAU = ([1.5, 3.5, 5.], [2.0, 1.0, 0.15])
+LOW_SPEED_CALM_BAND = (5., 20.)
 MAX_LATERAL_ACCEL = 3.6  # m/s^2; ISO 11270 3.0 + 6% bank tolerance
 STEER_STIFFNESS_K = 0.0015  # per (m/s)^2; matches VehicleModel default
 
@@ -38,8 +40,13 @@ class LkasAngleStateMachine:
     if self.engaged:
       v = max(CS.out.vEgo, 1.0)
       max_angle = math.degrees(self._lat_accel_coeff * (1.0 + STEER_STIFFNESS_K * v * v) / (v * v))
-      self.planner_angle_lpf.update_alpha(float(np.interp(CS.out.vEgo, *PLANNER_ANGLE_LP_TAU)))
-      self.planner_angle_lpf.update(max(-max_angle, min(max_angle, CC.actuators.steeringAngleDeg)))
+      target = max(-max_angle, min(max_angle, CC.actuators.steeringAngleDeg))
+      tau = float(np.interp(CS.out.vEgo, *PLANNER_ANGLE_LP_TAU))
+      calm_tau = float(np.interp(CS.out.vEgo, *LOW_SPEED_CALM_TAU))
+      if calm_tau > tau:
+        tau = float(np.interp(abs(target - self.planner_angle_lpf.x), LOW_SPEED_CALM_BAND, (calm_tau, tau)))
+      self.planner_angle_lpf.update_alpha(tau)
+      self.planner_angle_lpf.update(target)
     else:
       self.planner_angle_lpf.x = CS.out.steeringAngleDeg  # pin to measured so re-engage starts at zero error
 
