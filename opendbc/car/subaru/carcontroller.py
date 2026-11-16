@@ -23,6 +23,9 @@ ENGAGE_DASH_LEAD_FRAMES = 8              # latched engage prevents stranded dash
 # Only smoothing in the pipeline: MPC's steeringAngleDeg -> this LPF -> panda rate limit.
 # Speed-scheduled: heavy smoothing under 15 mph kills the low-speed reversal/wobble; flat 0.20 above.
 PLANNER_ANGLE_LP_ALPHA    = ([0., 4.5, 6.7], [0.02, 0.02, 0.20])   # m/s -> alpha; very heavy under 10 mph (kills low-speed wobble), ramps to 0.20 baseline by 15 mph
+LOW_SPEED_CALM_ALPHA = ([1.5, 3.5, 4.5, 6.7], [0.01, 0.02, 0.02, 0.20])
+LOW_SPEED_FAST_ALPHA = ([5., 6.7], [0.12, 0.20])
+LOW_SPEED_CALM_BAND = (5., 20.)
 
 
 class LkasAngleStateMachine:
@@ -94,7 +97,9 @@ class LkasAngleStateMachine:
 
     if request_active:
       # LPF the target with speed-scheduled alpha; apply_std_steer_angle_limits enforces the hard rate cap.
-      alpha = float(np.interp(CS.out.vEgoRaw, *PLANNER_ANGLE_LP_ALPHA))
+      calm_alpha = float(np.interp(CS.out.vEgoRaw, *LOW_SPEED_CALM_ALPHA))
+      fast_alpha = float(np.interp(CS.out.vEgoRaw, *LOW_SPEED_FAST_ALPHA))
+      alpha = 1.0 / float(np.interp(abs(target_angle - self.planner_angle_lpf.x), LOW_SPEED_CALM_BAND, (1.0 / calm_alpha, 1.0 / fast_alpha)))
       self.planner_angle_lpf.update_alpha(DT_CTRL/alpha - DT_CTRL)
       self.planner_angle_lpf.update(target_angle)
       # During taper, chase the live EPS angle for a smooth merge into the inactive path.
