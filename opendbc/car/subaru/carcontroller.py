@@ -15,9 +15,7 @@ MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
 # LPF in pipeline (MPC -> LPF -> panda rate limit); ticks every 10 ms, CAN sends every 20 ms
-PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.15, 0.05, 0.0])  # m/s -> tau (s); identity above 20 m/s
-LOW_SPEED_CALM_TAU = ([1.5, 3.5, 5.], [2.0, 1.0, 0.15])
-LOW_SPEED_CALM_BAND = (5., 20.)
+PLANNER_ANGLE_LP_TAU = ([10., 20.], [0.05, 0.0])  # m/s -> tau (s); same small lag at every speed below 10 m/s, identity above 20 m/s
 LKAS_MAX_CMD_ANGLE = 430.  # deg; never command beyond this
 LKAS_SUSPEND_ANGLE = 450.  # deg; drop LKAS_Request while the wheel is beyond this (EPS follows to 450 with no faults)
 
@@ -49,13 +47,8 @@ class LkasAngleStateMachine:
     # advance LPF at 100 Hz (independent of STEER_STEP); cap target to the safety lateral-accel angle; update_alpha() takes tau
     self.max_angle = min(max_angle, LKAS_MAX_CMD_ANGLE)
     if self.engaged:
-      target = max(-self.max_angle, min(self.max_angle, CC.actuators.steeringAngleDeg))
-      tau = float(np.interp(CS.out.vEgo, *PLANNER_ANGLE_LP_TAU))
-      calm_tau = float(np.interp(CS.out.vEgo, *LOW_SPEED_CALM_TAU))
-      if calm_tau > tau:
-        tau = float(np.interp(abs(target - self.planner_angle_lpf.x), LOW_SPEED_CALM_BAND, (calm_tau, tau)))
-      self.planner_angle_lpf.update_alpha(tau)
-      self.planner_angle_lpf.update(target)
+      self.planner_angle_lpf.update_alpha(float(np.interp(CS.out.vEgo, *PLANNER_ANGLE_LP_TAU)))
+      self.planner_angle_lpf.update(max(-self.max_angle, min(self.max_angle, CC.actuators.steeringAngleDeg)))
     else:
       self.planner_angle_lpf.x = CS.out.steeringAngleDeg  # pin to measured so re-engage starts at zero error
 
