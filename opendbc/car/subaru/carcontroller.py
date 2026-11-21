@@ -15,7 +15,7 @@ MAX_STEER_RATE = 25  # deg/s
 MAX_STEER_RATE_FRAMES = 7  # tx control frames needed before torque can be cut
 
 # LPF in pipeline (MPC -> LPF -> panda rate limit); ticks every 10 ms, CAN sends every 20 ms
-PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.15, 0.05, 0.0])  # m/s -> tau (s); keeps 2-4 Hz planner content off the EPS at low speed, identity above 20 m/s
+PLANNER_ANGLE_LP_TAU = ([5., 10., 20.], [0.15, 0.05, 0.03])  # m/s -> tau (s); 0.15 calms low speed, 0.03 floor rounds off modeld's 20 Hz steps
 LKAS_MAX_LEAD = 15.  # deg; command never runs further than this from a stalled wheel (EPS faults when driven far past it)
 LKAS_LEAD_PER_RATE = 0.15  # s; extra lead allowed while the wheel is moving, so normal tracking is never capped
 LKAS_MAX_CMD_ANGLE = 430.  # deg; never command beyond this
